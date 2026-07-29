@@ -1,0 +1,69 @@
+Avant de commencer le développement, je souhaite que tu prennes le temps d'analyser complètement le projet.
+
+Commence par lire attentivement tous les fichiers présents dans le dossier `infos`.
+
+Ce dossier contient toute la documentation nécessaire :
+
+- README de l'architecture
+- Roadmap de développement
+- Prototype React
+- Payload Dynatrace
+- Documentation Gemini
+- Format JSON des notifications Kafka
+- Toutes les informations fonctionnelles utiles
+
+Ne commence pas immédiatement à coder.
+
+Je souhaite d'abord que tu comprennes complètement le contexte du projet avant toute génération de code.
+
+Ensuite :
+
+1. Vérifie que la roadmap est cohérente avec l'architecture actuelle.
+
+2. Si tu identifies des incohérences mineures ou des améliorations, signale-les avant de coder.
+
+3. Commence uniquement par la première phase de la roadmap (Phase 0 : Socle technique local).
+
+Important :
+
+Ne développe AUCUNE fonctionnalité appartenant aux phases suivantes.
+
+Si une dépendance vers une phase future est nécessaire, crée uniquement les interfaces, contrats ou placeholders nécessaires, sans implémentation.
+
+Je souhaite progresser étape par étape afin de bien comprendre chaque partie de l'application.
+
+À la fin de cette phase :
+
+- vérifie que tout compile correctement ;
+- corrige les éventuelles erreurs de compilation ;
+- explique brièvement les décisions importantes prises.
+
+Je souhaite également que tu crées un fichier nommé :
+
+docs/development-progress.md
+
+(si le dossier docs n'existe pas, crée-le).
+
+Ce fichier devra être maintenu pendant tout le développement.
+
+Après chaque prompt ayant un impact sur le projet, tu devras automatiquement mettre à jour ce fichier.
+
+Ce document n'est pas un journal personnel mais un suivi de l'avancement du projet.
+
+Pour chaque phase réalisée, ajoute :
+
+- numéro et nom de la phase ;
+- statut (En cours / Terminée) ;
+- objectifs réalisés ;
+- fichiers créés ;
+- fichiers modifiés ;
+- décisions d'architecture importantes ;
+- dépendances créées ;
+- points restant à faire ;
+- prochaine étape recommandée.
+
+À chaque nouveau prompt, mets simplement à jour ce fichier sans perdre l'historique précédent.
+
+Je souhaite que ce document reflète en permanence l'état réel du projet.
+
+Pendant toute la durée du projet, privilégie la qualité de l'architecture, la lisibilité du code, la faible dépendance entre les modules et la compréhension pédagogique plutôt que la vitesse de génération.

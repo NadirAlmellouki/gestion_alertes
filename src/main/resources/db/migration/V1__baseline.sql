@@ -1,0 +1,2 @@
+-- AlertOps baseline migration
+-- This file establishes the Flyway baseline. Schema objects will be added in subsequent migrations.
