@@ -79,3 +79,6 @@ app:
       secret: ${JWT_SECRET:dev-secret-key-at-least-256-bits-long-for-hs256-algorithm}
       issuer: alertops-dev
       expiration-minutes: 480
+  ingestion:
+    dynatrace:
+      token: ${DYNATRACE_INGESTION_TOKEN:dev-ingestion-token}

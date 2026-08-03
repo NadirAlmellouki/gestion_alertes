@@ -86,3 +86,53 @@ Phase 1 — Common & Sécurité (squelette).
 
 ### Prochaine étape recommandée
 **Phase 2 — Module Alerting** : ingestion Dynatrace, validation payload, persistance, API lecture.
+
+---
+
+## Phase 2 — Module Alerting
+
+**Statut :** Terminée
+
+### Objectifs réalisés
+- [x] Modèle domaine : `Alert`, `AlertTimelineEntry`, `NotificationState`, `AlertId`, `RawAlertPayload`, `ValidationResult`
+- [x] `AlertPayloadValidator` + `DefaultAlertPayloadValidator` (JSON, taille max, champs obligatoires)
+- [x] `DynatraceAlertNormalizer` (mapping champs Dynatrace + `ProblemDetailsJSONv2`)
+- [x] `AlertRepositoryPort` + adapter JPA (`AlertEntity`, `AlertTimelineEntryEntity`)
+- [x] Migration Flyway `V3__alerts.sql`
+- [x] `IngestAlertUseCase` (création/mise à jour, publication `AlertReceivedEvent`)
+- [x] `ListRecentAlertsUseCase` (72h), `ListAlertHistoryUseCase`, `GetAlertDetailUseCase`
+- [x] `DynatraceWebhookController` — `POST /api/v1/ingestion/dynatrace`
+- [x] `AlertController` — `GET /api/v1/alerts/recent|history|{id}` (RBAC opérateur+)
+- [x] Authentification ingestion par `X-Ingestion-Token` (`IngestionTokenFilter`)
+- [x] Fixture JSON + script `scripts/simulate_dynatrace.py`
+- [x] Tests unitaires et d'intégration (validation, webhook, API lecture)
+
+### Fichiers créés
+- Module `alerting/*` (domain, application, infrastructure, api, config)
+- `src/main/resources/db/migration/V3__alerts.sql`
+- `src/test/resources/fixtures/dynatrace-problem.json`
+- `scripts/simulate_dynatrace.py`
+- Tests : `DefaultAlertPayloadValidatorTest`, `DynatraceWebhookIntegrationTest`, `AlertControllerIntegrationTest`
+
+### Fichiers modifiés
+- `src/main/resources/application.yml` — `app.ingestion.dynatrace.token`
+- `src/test/resources/application.yml` — token de test
+- `SecurityConfig.java` — filtre ingestion avant JWT
+
+### Décisions d'architecture importantes
+1. **Validation synchrone → HTTP 400** pour payload invalide (rejet explicite, journalisé en WARN).
+2. **Payload valide → HTTP 201** avec `alertId`, `externalProblemId`, `created`.
+3. **Idempotence** : même `externalProblemId` = mise à jour + entrée timeline `UPDATED`.
+4. **État notification** initial : `EN_ATTENTE` (responsabilité plateforme ; résolution Dynatrace = `dynatraceState`).
+5. **`AlertReceivedEvent`** publié dès l'ingestion (consommé en Phase 9 par le pipeline).
+
+### Dépendances créées
+- Phase 3 (Classification) pourra écouter `AlertReceivedEvent`.
+- Aucune dépendance vers `classification`, `routingengine` ou `notification`.
+
+### Points restants à faire
+- Test manuel avec Docker + Postgres : `python scripts/simulate_dynatrace.py`
+- Remplacer la fixture par le vrai JSON entreprise quand `info/payload_dynatrace.txt` sera complété.
+
+### Prochaine étape recommandée
+**Phase 3 — Module Classification (Gemini)** : `AlertClassifierPort`, adapter Gemini, `ClassifyAlertUseCase`.

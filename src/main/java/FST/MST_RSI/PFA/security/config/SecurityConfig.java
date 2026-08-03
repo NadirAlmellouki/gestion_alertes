@@ -1,5 +1,6 @@
 package FST.MST_RSI.PFA.security.config;
 
+import FST.MST_RSI.PFA.alerting.config.IngestionTokenFilter;
 import FST.MST_RSI.PFA.security.infrastructure.JwtAuthenticationConverter;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -15,6 +16,7 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
 
 import javax.crypto.spec.SecretKeySpec;
@@ -32,6 +34,7 @@ public class SecurityConfig {
             HttpSecurity http,
             JwtDecoder jwtDecoder,
             JwtAuthenticationConverter jwtAuthenticationConverter,
+            IngestionTokenFilter ingestionTokenFilter,
             Environment environment
     ) throws Exception {
         boolean devProfileActive = Arrays.asList(environment.getActiveProfiles()).contains("dev");
@@ -51,6 +54,7 @@ public class SecurityConfig {
                     if (devProfileActive) {
                         auth.requestMatchers("/dev/**").permitAll();
                     }
+                    auth.requestMatchers("/api/v1/ingestion/**").permitAll();
                     auth.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll();
                     auth.anyRequest().authenticated();
                 })
@@ -58,6 +62,8 @@ public class SecurityConfig {
                         .jwt(jwt -> jwt
                                 .decoder(jwtDecoder)
                                 .jwtAuthenticationConverter(jwtAuthenticationConverter)));
+
+        http.addFilterBefore(ingestionTokenFilter, BearerTokenAuthenticationFilter.class);
 
         return http.build();
     }

@@ -1,7 +1,9 @@
 package FST.MST_RSI.PFA.alerting.domain.service;
 
-import org.springframework.stereotype.Component;
+import FST.MST_RSI.PFA.alerting.domain.model.RawAlertPayload;
+import FST.MST_RSI.PFA.alerting.domain.model.ValidationResult;
 
-@Component
-public class AlertPayloadValidator {
+public interface AlertPayloadValidator {
+
+    ValidationResult validate(RawAlertPayload payload);
 }

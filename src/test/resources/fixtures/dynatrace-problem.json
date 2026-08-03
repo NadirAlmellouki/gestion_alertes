@@ -1,0 +1,35 @@
+{
+  "PID": "1234567890123456789",
+  "ProblemID": "P-20260729-001",
+  "ProblemTitle": "Saturation CPU détectée sur PayCore",
+  "ProblemSeverity": "RESOURCE_CONTENTION",
+  "ProblemImpact": "APPLICATION",
+  "State": "OPEN",
+  "ProblemURL": "https://dynatrace.example.com/ui/problems/P-20260729-001",
+  "ImpactedEntity": "PayCore",
+  "ImpactedEntityNames": "prd-app-paycore-01.bank.internal",
+  "ProblemDetailsJSONv2": {
+    "problemId": "1234567890123456789",
+    "title": "Saturation CPU détectée sur PayCore",
+    "severityLevel": "RESOURCE_CONTENTION",
+    "impactLevel": "APPLICATION",
+    "status": "OPEN",
+    "startTime": 1722000000000,
+    "affectedEntities": [
+      {
+        "name": "PayCore",
+        "entityId": {
+          "id": "HOST-ABC123",
+          "type": "HOST"
+        }
+      }
+    ],
+    "entityTags": [
+      {
+        "context": "CONTEXTLESS",
+        "key": "environment",
+        "value": "Production"
+      }
+    ]
+  }
+}
