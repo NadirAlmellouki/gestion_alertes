@@ -1,16 +1,16 @@
 package FST.MST_RSI.PFA.alerting.api.rest;
 
 import FST.MST_RSI.PFA.alerting.application.usecase.IngestAlertUseCase;
-import FST.MST_RSI.PFA.security.domain.Role;
-import FST.MST_RSI.PFA.security.infrastructure.JwtTokenService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -27,9 +27,6 @@ class AlertControllerIntegrationTest {
 
     @Autowired
     private IngestAlertUseCase ingestAlertUseCase;
-
-    @Autowired
-    private JwtTokenService jwtTokenService;
 
     private String alertId;
 
@@ -48,10 +45,8 @@ class AlertControllerIntegrationTest {
 
     @Test
     void operatorCanReadRecentAlerts() throws Exception {
-        String token = jwtTokenService.generateToken("operateur1", Role.OPERATEUR);
-
         mockMvc.perform(get("/api/v1/alerts/recent")
-                        .header("Authorization", "Bearer " + token))
+                        .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_OPS"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value(alertId))
                 .andExpect(jsonPath("$[0].notificationState").value("EN_ATTENTE"));
@@ -59,10 +54,8 @@ class AlertControllerIntegrationTest {
 
     @Test
     void operatorCanReadAlertDetail() throws Exception {
-        String token = jwtTokenService.generateToken("operateur1", Role.OPERATEUR);
-
         mockMvc.perform(get("/api/v1/alerts/" + alertId)
-                        .header("Authorization", "Bearer " + token))
+                        .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_OPS"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.title").value("Saturation CPU détectée sur PayCore"))
                 .andExpect(jsonPath("$.timeline[0].eventType").value("RECEIVED"));

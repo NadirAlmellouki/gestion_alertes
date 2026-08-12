@@ -6,48 +6,55 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import java.util.UUID;
 
 @Entity
 @Table(name = "alert_timeline")
 public class AlertTimelineEntryEntity {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "alert_id", nullable = false)
     private AlertEntity alert;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "event_type", nullable = false)
+    @Column(name = "event_type", length = 100)
     private TimelineEventType eventType;
 
-    @Column(nullable = false, columnDefinition = "TEXT")
-    private String message;
+    @Column(columnDefinition = "TEXT")
+    private String description;
 
-    @Column(name = "occurred_at", nullable = false)
-    private Instant occurredAt;
+    @Column(name = "event_time", nullable = false)
+    private Instant eventTime;
+
+    @Column(name = "created_by")
+    private String createdBy;
 
     protected AlertTimelineEntryEntity() {
     }
 
-    public AlertTimelineEntryEntity(AlertEntity alert, TimelineEventType eventType, String message, Instant occurredAt) {
+    public AlertTimelineEntryEntity(
+            AlertEntity alert,
+            TimelineEventType eventType,
+            String description,
+            Instant eventTime
+    ) {
+        this.id = UUID.randomUUID();
         this.alert = alert;
         this.eventType = eventType;
-        this.message = message;
-        this.occurredAt = occurredAt;
+        this.description = description;
+        this.eventTime = eventTime;
     }
 
-    public Long getId() {
+    public UUID getId() {
         return id;
     }
 
@@ -59,11 +66,15 @@ public class AlertTimelineEntryEntity {
         return eventType;
     }
 
-    public String getMessage() {
-        return message;
+    public String getDescription() {
+        return description;
     }
 
-    public Instant getOccurredAt() {
-        return occurredAt;
+    public Instant getEventTime() {
+        return eventTime;
+    }
+
+    public String getCreatedBy() {
+        return createdBy;
     }
 }

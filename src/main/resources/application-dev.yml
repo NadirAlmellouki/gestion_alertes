@@ -1,0 +1,31 @@
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          keycloak:
+            provider: keycloak
+            client-id: alertops-web
+            authorization-grant-type: authorization_code
+            client-authentication-method: none
+            scope: openid, profile, email
+        provider:
+          keycloak:
+            issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8083/realms/alertops}
+            user-name-attribute: preferred_username
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8083/realms/alertops}
+
+app:
+  security:
+    claims:
+      first-name: given_name
+      last-name: family_name
+  business-context:
+    source: postgres
+  referential:
+    excel-path: file:info/referentiel-applicatif-complet-2026-08-04.xlsx
+    import-on-startup: false
+  classification:
+    prompt-version: v2

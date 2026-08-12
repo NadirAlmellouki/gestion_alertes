@@ -71,14 +71,21 @@ springdoc:
 app:
   llm:
     provider: gemini
+    gemini:
+      api-key: ${GEMINI_API_KEY:}
+      model: ${GEMINI_MODEL:gemini-2.0-flash}
+      base-url: ${GEMINI_BASE_URL:https://generativelanguage.googleapis.com}
+      timeout-seconds: 30
   voice:
     tts:
       provider: fake
-  security:
-    jwt:
-      secret: ${JWT_SECRET:dev-secret-key-at-least-256-bits-long-for-hs256-algorithm}
-      issuer: alertops-dev
-      expiration-minutes: 480
+  business-context:
+    source: postgres
+  classification:
+    prompt-version: v2
+  referential:
+    excel-path: file:info/referentiel-applicatif-complet-2026-08-04.xlsx
+    import-on-startup: false
   ingestion:
     dynatrace:
       token: ${DYNATRACE_INGESTION_TOKEN:dev-ingestion-token}

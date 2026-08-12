@@ -50,7 +50,7 @@ public class AlertMapper {
 
     private AlertTimelineEntryDto toTimelineEntry(AlertTimelineEntry entry) {
         return new AlertTimelineEntryDto(
-                entry.getId(),
+                entry.getId() == null ? null : entry.getId().toString(),
                 entry.getEventType(),
                 entry.getMessage(),
                 entry.getOccurredAt()

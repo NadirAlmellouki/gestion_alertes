@@ -1,10 +1,11 @@
 package FST.MST_RSI.PFA.alerting.domain.model;
 
 import java.time.Instant;
+import java.util.UUID;
 
 public class AlertTimelineEntry {
 
-    private Long id;
+    private UUID id;
     private final TimelineEventType eventType;
     private final String message;
     private final Instant occurredAt;
@@ -15,14 +16,14 @@ public class AlertTimelineEntry {
         this.occurredAt = occurredAt;
     }
 
-    public AlertTimelineEntry(Long id, TimelineEventType eventType, String message, Instant occurredAt) {
+    public AlertTimelineEntry(UUID id, TimelineEventType eventType, String message, Instant occurredAt) {
         this.id = id;
         this.eventType = eventType;
         this.message = message;
         this.occurredAt = occurredAt;
     }
 
-    public Long getId() {
+    public UUID getId() {
         return id;
     }
 

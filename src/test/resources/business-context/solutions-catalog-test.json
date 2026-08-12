@@ -1,0 +1,35 @@
+{
+  "solutions": [
+    {
+      "name": "PayCore",
+      "entity": "Core Processing & Services",
+      "pole": "Pilotage & Moyens Generaux",
+      "domaine": "Paiements",
+      "type": "InHouse",
+      "psi": "P1",
+      "typeService": "Applicatif",
+      "tenant": "Banque",
+      "description": "Plateforme de paiement cœur",
+      "admins": {
+        "TAM": ["tam.paycore@example.com"],
+        "ADMIN_TECHNIQUE": ["tech.paycore@example.com"],
+        "ADMIN_FONCTIONNEL": ["fonc.paycore@example.com"]
+      }
+    },
+    {
+      "name": "AD",
+      "entity": "Infrastructure & Production",
+      "pole": "SAI",
+      "domaine": "Administration & Expertise",
+      "type": "Progiciel",
+      "psi": "P2",
+      "typeService": "Technique",
+      "tenant": "Banque",
+      "description": "Active Directory",
+      "admins": {
+        "TAM": ["tam.ad@example.com"],
+        "ADMIN_TECHNIQUE": ["tech.ad@example.com"]
+      }
+    }
+  ]
+}

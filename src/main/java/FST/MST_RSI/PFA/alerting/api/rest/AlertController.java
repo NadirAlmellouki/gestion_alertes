@@ -35,13 +35,13 @@ public class AlertController {
     }
 
     @GetMapping("/recent")
-    @PreAuthorize("hasAnyRole('OPERATEUR','SUPERVISEUR','ADMINISTRATEUR')")
+    @PreAuthorize("hasAnyRole('OPS','SUPERVISOR')")
     public List<AlertSummaryDto> listRecent() {
         return listRecentAlertsUseCase.execute();
     }
 
     @GetMapping("/history")
-    @PreAuthorize("hasAnyRole('OPERATEUR','SUPERVISEUR','ADMINISTRATEUR')")
+    @PreAuthorize("hasAnyRole('OPS','SUPERVISOR')")
     public List<AlertSummaryDto> listHistory(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
@@ -52,7 +52,7 @@ public class AlertController {
     }
 
     @GetMapping("/{alertId}")
-    @PreAuthorize("hasAnyRole('OPERATEUR','SUPERVISEUR','ADMINISTRATEUR')")
+    @PreAuthorize("hasAnyRole('OPS','SUPERVISOR')")
     public AlertDto getDetail(@PathVariable String alertId) {
         return getAlertDetailUseCase.execute(alertId);
     }

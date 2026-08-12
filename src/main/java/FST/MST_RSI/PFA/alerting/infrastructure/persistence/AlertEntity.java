@@ -11,6 +11,8 @@ import jakarta.persistence.Id;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -18,51 +20,70 @@ import java.util.List;
 import java.util.UUID;
 
 @Entity
-@Table(name = "alerts")
+@Table(name = "alert")
 public class AlertEntity {
 
     @Id
     private UUID id;
 
-    @Column(name = "external_problem_id", nullable = false, unique = true)
-    private String externalProblemId;
+    @Column(name = "problem_id", nullable = false, unique = true, length = 100)
+    private String problemId;
 
-    @Column(nullable = false, length = 500)
+    @Column(name = "display_id", length = 100)
+    private String displayId;
+
+    @Column(length = 500)
     private String title;
 
-    @Column(name = "application_name")
-    private String applicationName;
-
-    private String environment;
-
+    @Column(length = 20)
     private String severity;
 
-    private String impact;
+    @Column(name = "impact_level", length = 50)
+    private String impactLevel;
 
-    @Column(name = "dynatrace_state")
-    private String dynatraceState;
+    @Column(length = 20)
+    private String status;
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "notification_state", nullable = false)
-    private NotificationState notificationState;
+    @Column(nullable = false, length = 50)
+    private String source = "DYNATRACE";
 
-    @Column(name = "problem_url", length = 1000)
-    private String problemUrl;
+    @Column(name = "linked_problem_id", length = 100)
+    private String linkedProblemId;
 
-    @Column(name = "host_name")
-    private String hostName;
+    @Column(name = "start_time")
+    private Instant startTime;
 
-    @Column(name = "raw_payload", nullable = false, columnDefinition = "TEXT")
-    private String rawPayload;
+    @Column(name = "end_time")
+    private Instant endTime;
 
     @Column(name = "received_at", nullable = false)
     private Instant receivedAt;
 
-    @Column(name = "problem_started_at")
-    private Instant problemStartedAt;
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "raw_payload", nullable = false, columnDefinition = "jsonb")
+    private String rawPayload;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "entity_tags", columnDefinition = "jsonb")
+    private String entityTags;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "impact_analysis", columnDefinition = "jsonb")
+    private String impactAnalysis;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "evidence_details", columnDefinition = "jsonb")
+    private String evidenceDetails;
+
+    @Column(name = "created_at", nullable = false)
+    private Instant createdAt;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "notification_state", nullable = false, length = 30)
+    private NotificationState notificationState = NotificationState.EN_ATTENTE;
 
     @OneToMany(mappedBy = "alert", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
-    @OrderBy("occurredAt ASC")
+    @OrderBy("eventTime ASC")
     private List<AlertTimelineEntryEntity> timeline = new ArrayList<>();
 
     protected AlertEntity() {
@@ -76,12 +97,20 @@ public class AlertEntity {
         this.id = id;
     }
 
-    public String getExternalProblemId() {
-        return externalProblemId;
+    public String getProblemId() {
+        return problemId;
     }
 
-    public void setExternalProblemId(String externalProblemId) {
-        this.externalProblemId = externalProblemId;
+    public void setProblemId(String problemId) {
+        this.problemId = problemId;
+    }
+
+    public String getDisplayId() {
+        return displayId;
+    }
+
+    public void setDisplayId(String displayId) {
+        this.displayId = displayId;
     }
 
     public String getTitle() {
@@ -92,22 +121,6 @@ public class AlertEntity {
         this.title = title;
     }
 
-    public String getApplicationName() {
-        return applicationName;
-    }
-
-    public void setApplicationName(String applicationName) {
-        this.applicationName = applicationName;
-    }
-
-    public String getEnvironment() {
-        return environment;
-    }
-
-    public void setEnvironment(String environment) {
-        this.environment = environment;
-    }
-
     public String getSeverity() {
         return severity;
     }
@@ -116,52 +129,52 @@ public class AlertEntity {
         this.severity = severity;
     }
 
-    public String getImpact() {
-        return impact;
+    public String getImpactLevel() {
+        return impactLevel;
     }
 
-    public void setImpact(String impact) {
-        this.impact = impact;
+    public void setImpactLevel(String impactLevel) {
+        this.impactLevel = impactLevel;
     }
 
-    public String getDynatraceState() {
-        return dynatraceState;
+    public String getStatus() {
+        return status;
     }
 
-    public void setDynatraceState(String dynatraceState) {
-        this.dynatraceState = dynatraceState;
+    public void setStatus(String status) {
+        this.status = status;
     }
 
-    public NotificationState getNotificationState() {
-        return notificationState;
+    public String getSource() {
+        return source;
     }
 
-    public void setNotificationState(NotificationState notificationState) {
-        this.notificationState = notificationState;
+    public void setSource(String source) {
+        this.source = source;
     }
 
-    public String getProblemUrl() {
-        return problemUrl;
+    public String getLinkedProblemId() {
+        return linkedProblemId;
     }
 
-    public void setProblemUrl(String problemUrl) {
-        this.problemUrl = problemUrl;
+    public void setLinkedProblemId(String linkedProblemId) {
+        this.linkedProblemId = linkedProblemId;
     }
 
-    public String getHostName() {
-        return hostName;
+    public Instant getStartTime() {
+        return startTime;
     }
 
-    public void setHostName(String hostName) {
-        this.hostName = hostName;
+    public void setStartTime(Instant startTime) {
+        this.startTime = startTime;
     }
 
-    public String getRawPayload() {
-        return rawPayload;
+    public Instant getEndTime() {
+        return endTime;
     }
 
-    public void setRawPayload(String rawPayload) {
-        this.rawPayload = rawPayload;
+    public void setEndTime(Instant endTime) {
+        this.endTime = endTime;
     }
 
     public Instant getReceivedAt() {
@@ -172,12 +185,52 @@ public class AlertEntity {
         this.receivedAt = receivedAt;
     }
 
-    public Instant getProblemStartedAt() {
-        return problemStartedAt;
+    public String getRawPayload() {
+        return rawPayload;
     }
 
-    public void setProblemStartedAt(Instant problemStartedAt) {
-        this.problemStartedAt = problemStartedAt;
+    public void setRawPayload(String rawPayload) {
+        this.rawPayload = rawPayload;
+    }
+
+    public String getEntityTags() {
+        return entityTags;
+    }
+
+    public void setEntityTags(String entityTags) {
+        this.entityTags = entityTags;
+    }
+
+    public String getImpactAnalysis() {
+        return impactAnalysis;
+    }
+
+    public void setImpactAnalysis(String impactAnalysis) {
+        this.impactAnalysis = impactAnalysis;
+    }
+
+    public String getEvidenceDetails() {
+        return evidenceDetails;
+    }
+
+    public void setEvidenceDetails(String evidenceDetails) {
+        this.evidenceDetails = evidenceDetails;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public void setCreatedAt(Instant createdAt) {
+        this.createdAt = createdAt;
+    }
+
+    public NotificationState getNotificationState() {
+        return notificationState;
+    }
+
+    public void setNotificationState(NotificationState notificationState) {
+        this.notificationState = notificationState;
     }
 
     public List<AlertTimelineEntryEntity> getTimeline() {

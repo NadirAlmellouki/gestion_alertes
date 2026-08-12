@@ -1,0 +1,64 @@
+{
+  "realm": "alertops",
+  "enabled": true,
+  "displayName": "AlertOps Local",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "roles": {
+    "realm": [
+      { "name": "OPS", "description": "Operations (infrastructure + administration applicative)" },
+      { "name": "SUPERVISOR", "description": "Supervision notifications et escalade" }
+    ]
+  },
+  "users": [
+    {
+      "username": "nadir",
+      "enabled": true,
+      "email": "nadir.almellouki@alertops.local",
+      "firstName": "Nadir",
+      "lastName": "Almellouki",
+      "credentials": [
+        { "type": "password", "value": "ops", "temporary": false }
+      ],
+      "realmRoles": ["OPS"]
+    },
+    {
+      "username": "superviseur",
+      "enabled": true,
+      "email": "superviseur@alertops.local",
+      "firstName": "Nadia",
+      "lastName": "Benchekroun",
+      "credentials": [
+        { "type": "password", "value": "superviseur", "temporary": false }
+      ],
+      "realmRoles": ["SUPERVISOR"]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "alertops-web",
+      "name": "AlertOps Web (login navigateur)",
+      "enabled": true,
+      "publicClient": true,
+      "directAccessGrantsEnabled": false,
+      "standardFlowEnabled": true,
+      "redirectUris": ["http://localhost:8080/login/oauth2/code/keycloak"],
+      "webOrigins": ["http://localhost:8080"],
+      "protocol": "openid-connect"
+    },
+    {
+      "clientId": "alertops-api",
+      "name": "AlertOps API",
+      "enabled": true,
+      "publicClient": true,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "redirectUris": ["http://localhost:5173/*", "http://localhost:3000/*"],
+      "webOrigins": ["http://localhost:5173", "http://localhost:3000"],
+      "protocol": "openid-connect"
+    }
+  ]
+}

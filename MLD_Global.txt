@@ -1,0 +1,977 @@
+
+////////////////////////////////////////////////////////////
+//
+// MLD GLOBAL — V2 (aligné Master Prompt V2 + schema.sql)
+//
+// Corrections V2 par rapport à la version précédente de ce fichier :
+//   - solution_attribute.popularity (integer) -> target_scope (varchar) + ajout functional_description
+//   - solution_attribute.psi : confirmé comme LA priorité métier fixe de la Solution (voir note)
+//   - solution_attribute.criticality (colonne orpheline, jamais alimentée) supprimée
+//   - unit_admin_assignment.role : CHECK figé (4 valeurs) remplacé par une FK vers
+//     la nouvelle table admin_role_type (12 rôles métier réels) + UNIQUE(unit_id,person_id,role)
+//   - organizational_unit : ajout is_subsidiary (donnée "Filiale" du référentiel Entités)
+//   - alert : ajout linked_problem_id (corrélation d'alertes liées)
+//   - alert_entity : ajout entity_role (distingue affectedEntities/impactedEntities/
+//     rootCauseEntity/evidenceDetails.details du JSON Dynatrace)
+//   - llm_classification.business_priority SUPPRIMÉE : le LLM ne calcule/propose jamais
+//     de priorité métier (Master Prompt V2). La seule priorité métier valide est
+//     solution_attribute.psi (donnée fixe du référentiel).
+//   - business_rule.priority renommée rule_evaluation_priority : ordre d'évaluation de
+//     la règle uniquement, sans aucun rapport avec solution_attribute.psi
+//   - rule_exception (table à part, liste plate) supprimée et fusionnée dans
+//     rule_condition_group via un discriminant block_type (CONDITION | EXCEPTION) :
+//     les exceptions utilisent désormais le même modèle de groupes AND/OR que les
+//     conditions (Master Prompt V2, §EXCEPTIONS)
+//   - Person reste le concept métier central (aucun renommage "Administrator" : ce
+//     terme ne désigne qu'un rôle Keycloak applicatif, jamais une entité de domaine)
+//
+// Corrections V3 (modèle de routage par étapes) :
+//   - routing_step repensée : Team/Group/Backup/MemberStrategy/durée globale de
+//     relance n'existent plus. Remplacés par une séquence d'étapes ordonnées
+//     (step_order, action_type, delay_after_seconds PROPRE à chaque étape).
+//   - routing_step.target_role + target_unit_type : une cible combine toujours un
+//     rôle métier réel (admin_role_type) ET le niveau organisationnel de l'alerte
+//     auquel il est résolu (Solution/Domaine/Pôle/Entité) — jamais un rôle inventé.
+//   - notification.call_mode (AUTO/MANUAL) + triggered_by_person_id : l'appel
+//     manuel du superviseur réutilise le même modèle qu'un appel automatique,
+//     sans table dédiée.
+//
+////////////////////////////////////////////////////////////
+
+
+////////////////////////////////////////////////////////////
+//
+// ORGANIZATION
+//
+////////////////////////////////////////////////////////////
+
+Table organizational_unit {
+
+  id uuid [pk]
+
+  code varchar(100) [unique]
+
+  name varchar(255) [not null]
+
+  unit_type varchar(20) [
+    not null,
+    note: 'CHECK (ENTITY, POLE, DOMAIN, SOLUTION) — réellement appliqué en SQL'
+  ]
+
+  parent_unit_id uuid
+
+  is_subsidiary boolean [default:false, note: 'Colonne "Filiale" du référentiel Entités']
+
+  active boolean [default:true]
+
+  created_at timestamptz
+
+  updated_at timestamptz
+}
+
+Table solution_attribute {
+
+  unit_id uuid [pk]
+
+  solution_type varchar(100) [note: 'CHECK (Progiciel, InHouse)']
+
+  psi varchar(100) [
+    note: 'CHECK (P0,P1,P2,P3,P4) — PRIORITE METIER FIXE DE LA SOLUTION (Master Prompt V2). Jamais calculee par le LLM, jamais modifiee par le moteur de regles ni le moteur de routage. Ne pas confondre avec business_rule.rule_evaluation_priority (ordre d evaluation d une regle, notion totalement differente).'
+  ]
+
+  service_type varchar(100) [note: 'CHECK (Applicatif, Technique)']
+
+  tenant varchar(100)
+
+  target_scope varchar(150) [note: 'anciennement "popularity" (integer, errone) — colonne Excel "Popularite", categorielle et multi-valeurs']
+
+  functional_description text [note: 'colonne Excel "Role"']
+
+  active boolean
+}
+
+////////////////////////////////////////////////////////////
+//
+// PERSON
+//
+// Person est l'unique concept metier representant un individu.
+// "Administrator" / "Supervisor" / "Operator" ne sont PAS des entites
+// de domaine separees : ce sont des roles Keycloak (autorisation
+// applicative), geres exclusivement par Keycloak, jamais stockes ici.
+// Le role METIER d'une Person (TAM, DBA, Infra, Responsable...) est
+// porte par unit_admin_assignment.role, totalement independant de son
+// eventuel role Keycloak. Voir Master Prompt V2, section ROLES : KEYCLOAK != ROLE METIER.
+//
+////////////////////////////////////////////////////////////
+
+Table person {
+
+  id uuid [pk]
+
+  first_name varchar(150)
+
+  last_name varchar(150)
+
+  full_name varchar(255) [not null]
+
+  email varchar(255) [note: 'UNIQUE INDEX partiel sur lower(email) — cle naturelle d idempotence pour l import Excel']
+
+  phone varchar(100)
+
+  active boolean [default:true]
+
+  created_at timestamptz
+
+  updated_at timestamptz
+}
+
+// Referentiel technique des roles METIER (remplace le CHECK fige a 4 valeurs :
+// TAM/TECHNICAL/FUNCTIONAL/RECETTE, qui ne couvrait que 4 des 12 roles reels du
+// referentiel Excel — 11 colonnes de role de la feuille Solutions + le role
+// "Responsable" porte par chaque Entite/Pole/Domaine). Donnee technique fixe,
+// independante des roles Keycloak.
+Table admin_role_type {
+
+  code varchar(40) [pk]
+
+  label varchar(150) [not null]
+
+  excel_column varchar(150)
+
+  applicable_scope varchar(20) [
+    not null,
+    default: 'SOLUTION',
+    note: 'CHECK (UNIT, SOLUTION) — UNIT = Entite/Pole/Domaine (role Responsable), SOLUTION = uniquement au niveau Solution'
+  ]
+
+  display_order integer
+
+  active boolean [default:true]
+}
+
+Table unit_admin_assignment {
+
+  id uuid [pk]
+
+  unit_id uuid
+
+  person_id uuid
+
+  role varchar(40) [
+    not null,
+    note: 'FK -> admin_role_type.code (role METIER, ex: TAM/DBA/INFRA_ADMIN/MANAGER... — sans rapport avec un role Keycloak)'
+  ]
+
+  primary_contact boolean
+
+  active boolean
+
+  created_at timestamptz
+
+  Indexes {
+    (unit_id, person_id, role) [unique, note: 'empeche tout doublon d affectation ; permet un upsert idempotent depuis l Excel']
+  }
+}
+
+Table member_availability {
+
+  id uuid [pk]
+
+  person_id uuid
+
+  availability varchar(20) [
+    note: 'CHECK(AVAILABLE,BUSY,VACATION,OFFLINE) — reellement applique en SQL'
+  ]
+
+  valid_from timestamptz
+
+  valid_to timestamptz
+}
+
+////////////////////////////////////////////////////////////
+//
+// ALERT
+//
+////////////////////////////////////////////////////////////
+
+Table alert {
+
+  id uuid [pk]
+
+  problem_id varchar(100) [unique]
+
+  display_id varchar(100)
+
+  title varchar(500)
+
+  severity varchar(20)
+
+  impact_level varchar(50)
+
+  status varchar(20) [note: 'CHECK (OPEN, CLOSED, RESOLVED)']
+
+  source varchar(50)
+
+  linked_problem_id varchar(100) [note: 'linkedProblemInfo.problemId du JSON Dynatrace — correlation d alertes liees']
+
+  resolved_solution_id uuid
+
+  start_time timestamptz
+
+  end_time timestamptz
+
+  received_at timestamptz
+
+  raw_payload jsonb [not null]
+
+  entity_tags jsonb
+
+  impact_analysis jsonb
+
+  evidence_details jsonb
+
+  created_at timestamptz
+}
+
+Table alert_entity {
+
+  id uuid [pk]
+
+  alert_id uuid
+
+  entity_type varchar(100)
+
+  entity_identifier varchar(255)
+
+  entity_name varchar(255)
+
+  entity_role varchar(20) [
+    default: 'AFFECTED',
+    note: 'CHECK (AFFECTED, IMPACTED, ROOT_CAUSE, EVIDENCE) — distingue affectedEntities / impactedEntities / rootCauseEntity / evidenceDetails.details du JSON Dynatrace'
+  ]
+
+  root_cause boolean
+}
+
+Table alert_comment {
+
+  id uuid [pk]
+
+  alert_id uuid
+
+  author varchar(255)
+
+  content text
+
+  context varchar(100)
+
+  created_at timestamptz
+}
+
+Table alert_timeline {
+
+  id uuid [pk]
+
+  alert_id uuid
+
+  event_type varchar(100)
+
+  description text
+
+  event_time timestamptz
+
+  created_by varchar(255)
+}
+
+Table alert_attachment {
+
+  id uuid [pk]
+
+  alert_id uuid
+
+  attachment_type varchar(100)
+
+  file_name varchar(255)
+
+  storage_path varchar(500)
+
+  uploaded_at timestamptz
+}
+
+////////////////////////////////////////////////////////////
+//
+// MLD GLOBAL
+// PARTIE 2
+//
+////////////////////////////////////////////////////////////
+
+
+////////////////////////////////////////////////////////////
+//
+// AI / LLM
+//
+// Le LLM ne calcule et ne propose JAMAIS de priorite metier (Master Prompt V2) :
+// llm_classification ne porte donc aucune colonne "priority"/"business_priority".
+// Il ne peut que proposer une Solution/Domaine/Pole/Entite candidats parmi les
+// valeurs existantes du referentiel (jamais inventees).
+//
+////////////////////////////////////////////////////////////
+
+Table ai_provider {
+
+  id uuid [pk]
+
+  code varchar(50) [unique]
+
+  label varchar(150)
+
+  endpoint varchar(500)
+
+  enabled boolean
+}
+
+Table prompt_template {
+
+  id uuid [pk]
+
+  version varchar(50)
+
+  name varchar(255)
+
+  description text
+
+  system_prompt text
+
+  active boolean
+
+  created_at timestamptz
+}
+
+Table llm_execution {
+
+  id uuid [pk]
+
+  alert_id uuid
+
+  provider_id uuid
+
+  prompt_template_id uuid
+
+  execution_time integer
+
+  input_tokens integer
+
+  output_tokens integer
+
+  status varchar(30)
+
+  created_at timestamptz
+}
+
+Table prompt_context {
+
+  id uuid [pk]
+
+  execution_id uuid
+
+  context_type varchar(100)
+
+  source varchar(100)
+
+  reference_id varchar(255)
+
+  content text
+}
+
+Table llm_classification {
+
+  id uuid [pk]
+
+  execution_id uuid
+
+  solution_id uuid [note: 'Solution CANDIDATE proposee par le LLM — jamais une priorite, jamais une donnee inventee hors referentiel']
+
+  confidence decimal(5,2) [note: 'CHECK 0-100']
+
+  reasoning text
+
+  suggested_domain uuid
+
+  suggested_pole uuid
+
+  suggested_entity uuid
+}
+
+Table llm_recommendation {
+
+  id uuid [pk]
+
+  classification_id uuid
+
+  recommendation_type varchar(100)
+
+  content text
+
+  confidence decimal(5,2)
+}
+
+////////////////////////////////////////////////////////////
+//
+// BUSINESS RULE ENGINE
+//
+// Business Rule
+//     |
+//     +-- Condition Groups (rule_condition_group, block_type = CONDITION)
+//     |       +-- rule_condition (operateur AND/OR porte par le groupe)
+//     |
+//     +-- Exceptions (rule_condition_group, block_type = EXCEPTION)
+//     |       +-- rule_condition (meme modele que les conditions)
+//     |
+//     +-- Actions (rule_action) — ne modifient JAMAIS Solution/Domaine/Pole/
+//         Entite/PSI (voir CHECK chk_rule_action_type_not_referential)
+//
+// Une regle s'applique si ses groupes CONDITION sont satisfaits ET qu'aucun de
+// ses groupes EXCEPTION n'est vrai.
+//
+////////////////////////////////////////////////////////////
+
+Table business_rule {
+
+  id uuid [pk]
+
+  code varchar(50) [unique]
+
+  name varchar(255)
+
+  description text
+
+  rule_evaluation_priority integer [
+    note: 'Ordre d evaluation de CETTE regle uniquement (valeur basse = evaluee en premier). SANS RAPPORT avec solution_attribute.psi — ne jamais confondre (Master Prompt V2).'
+  ]
+
+  enabled boolean
+
+  stop_on_match boolean [
+    note: 'Si vrai et que la regle correspond, arrete l evaluation des regles suivantes. Mecanisme unique d arret en V0 (pas de FIRST_MATCH/ALL_MATCHES global separe).'
+  ]
+
+  created_at timestamptz
+}
+
+Table rule_condition_group {
+
+  id uuid [pk]
+
+  rule_id uuid
+
+  block_type varchar(10) [
+    default: 'CONDITION',
+    note: 'CHECK (CONDITION, EXCEPTION) — un meme groupe sert soit de bloc de conditions, soit de bloc d exceptions de la regle'
+  ]
+
+  logical_operator varchar(5) [note: 'CHECK (AND, OR)']
+
+  execution_order integer
+}
+
+Table rule_condition {
+
+  id uuid [pk]
+
+  group_id uuid
+
+  field_name varchar(150)
+
+  operator varchar(30)
+
+  expected_value text
+
+  value_type varchar(30)
+
+  condition_order integer
+}
+
+Table rule_action {
+
+  id uuid [pk]
+
+  rule_id uuid
+
+  action_type varchar(50) [
+    note: 'CHECK d exclusion explicite : ne peut jamais valoir SET_SOLUTION / SET_DOMAIN / SET_POLE / SET_ENTITY / SET_PSI / OVERRIDE_PRIORITY'
+  ]
+
+  action_value text
+
+  execution_order integer
+}
+
+Table rule_execution {
+
+  id uuid [pk]
+
+  rule_id uuid
+
+  alert_id uuid
+
+  classification_id uuid
+
+  matched boolean
+
+  execution_duration_ms integer
+
+  executed_at timestamptz
+}
+
+////////////////////////////////////////////////////////////
+//
+// ROUTING ENGINE
+//
+////////////////////////////////////////////////////////////
+
+Table routing_policy {
+
+  id uuid [pk]
+
+  code varchar(50) [unique]
+
+  name varchar(255)
+
+  description text
+
+  enabled boolean
+
+  priority integer [
+    note: 'Ordre de selection entre politiques concurrentes. Sans rapport avec solution_attribute.psi ni business_rule.rule_evaluation_priority.'
+  ]
+}
+
+Table routing_step {
+
+  id uuid [pk]
+
+  routing_policy_id uuid
+
+  step_order integer [note: 'ordre de la sequence — le comportement du moteur est porte par cet ordre, pas par des drapeaux continue_if_*']
+
+  action_type varchar(30) [note: 'CHECK (VOICE_CALL, VOICE_RETRY, NEXT_PERSON, SMS, EMAIL, NOTIFY_SUPERVISOR)']
+
+  target_role varchar(40) [note: 'FK -> admin_role_type.code (role metier reellement present dans le referentiel Excel, jamais invente)']
+
+  target_unit_type varchar(20) [note: 'CHECK (SOLUTION, DOMAIN, POLE, ENTITY) — niveau de la hierarchie de l alerte auquel target_role est resolu ; un TAM au niveau SOLUTION != un MANAGER au niveau DOMAIN']
+
+  channel varchar(20) [note: 'CHECK (VOIP, SMS, EMAIL), nullable']
+
+  delay_after_seconds integer [note: 'delai propre a CETTE etape avant la suivante — plus de delai/nombre de relances global']
+}
+
+Table routing_execution {
+
+  id uuid [pk]
+
+  alert_id uuid
+
+  classification_id uuid
+
+  routing_policy_id uuid
+
+  selected_solution_id uuid
+
+  selected_person_id uuid
+
+  current_step integer
+
+  routing_status varchar(30)
+
+  started_at timestamptz
+
+  finished_at timestamptz
+}
+
+Table routing_history {
+
+  id uuid [pk]
+
+  routing_execution_id uuid
+
+  routing_step_id uuid
+
+  target_person_id uuid
+
+  target_unit_id uuid
+
+  action varchar(30)
+
+  action_time timestamptz
+
+  details text
+}
+
+Table routing_response {
+
+  id uuid [pk]
+
+  routing_history_id uuid
+
+  response varchar(20) [note: 'CHECK (ACCEPTED, REJECTED, TIMEOUT)']
+
+  response_time_seconds integer
+
+  received_at timestamptz
+}
+
+////////////////////////////////////////////////////////////
+//
+// MLD GLOBAL
+// PARTIE 3
+//
+////////////////////////////////////////////////////////////
+
+
+////////////////////////////////////////////////////////////
+//
+// NOTIFICATION / VOICE ENGINE
+//
+// V0 : canal Voice principal (appels + TTS). SMS/Email restent modelises
+// (notification_type, channel) pour l'extensibilite future mais ne sont pas
+// implementes en V0 (Master Prompt V2, section COMMUNICATION / EXTENSIBILITE SMS-EMAIL).
+// PostgreSQL ne stocke jamais le fichier audio lui-meme : voice_message.audio_file
+// est un chemin/reference (stockage local en V0, S3 prevu ensuite).
+//
+////////////////////////////////////////////////////////////
+
+Table notification {
+
+  id uuid [pk]
+
+  alert_id uuid
+
+  routing_execution_id uuid
+
+  template_id uuid
+
+  notification_type varchar(20) [note: 'CHECK (SMS, VOIP, EMAIL)']
+
+  notification_status varchar(20)
+
+  call_mode varchar(10) [default: 'AUTO', note: 'CHECK (AUTO, MANUAL) — MANUAL = appel declenche par un superviseur, sans TTS, mais historise/enregistre exactement comme un appel AUTO']
+
+  triggered_by_person_id uuid [note: 'renseigne uniquement si call_mode = MANUAL (Person superviseur)']
+
+  priority integer
+
+  created_at timestamptz
+}
+
+Table notification_template {
+
+  id uuid [pk]
+
+  code varchar(50) [unique]
+
+  channel varchar(20) [note: 'CHECK (SMS, VOIP, EMAIL)']
+
+  title varchar(255)
+
+  body text
+
+  active boolean
+}
+
+Table notification_recipient {
+
+  id uuid [pk]
+
+  notification_id uuid
+
+  person_id uuid
+
+  channel varchar(20)
+
+  destination varchar(255)
+
+  recipient_order integer
+}
+
+Table notification_attempt {
+
+  id uuid [pk]
+
+  recipient_id uuid
+
+  attempt_number integer
+
+  provider varchar(100)
+
+  provider_message_id varchar(255)
+
+  status varchar(20)
+
+  error_message text
+
+  started_at timestamptz
+
+  finished_at timestamptz
+}
+
+Table voice_message {
+
+  id uuid [pk]
+
+  notification_id uuid
+
+  generated_text text [note: 'texte produit par le LLM (TTS) — appel automatique uniquement, jamais pour un appel manuel superviseur']
+
+  tts_provider varchar(100)
+
+  audio_file varchar(500) [note: 'chemin/reference du fichier MP3 (stockage local V0 -> S3 futur) — jamais de blob audio en base']
+
+  duration_seconds integer
+
+  language varchar(20)
+
+  generated_at timestamptz
+}
+
+////////////////////////////////////////////////////////////
+//
+// AUDIT
+//
+////////////////////////////////////////////////////////////
+
+Table audit_log {
+
+  id uuid [pk]
+
+  actor_person_id uuid
+
+  alert_id uuid
+
+  llm_execution_id uuid
+
+  routing_execution_id uuid
+
+  notification_id uuid
+
+  action varchar(100)
+
+  entity_name varchar(100)
+
+  entity_id uuid
+
+  description text
+
+  ip_address varchar(100)
+
+  created_at timestamptz
+}
+
+Table audit_log_detail {
+
+  id uuid [pk]
+
+  audit_log_id uuid
+
+  field_name varchar(100)
+
+  old_value text
+
+  new_value text
+}
+
+////////////////////////////////////////////////////////////
+//
+// OBSERVABILITY
+//
+////////////////////////////////////////////////////////////
+
+Table system_event {
+
+  id uuid [pk]
+
+  alert_id uuid
+
+  llm_execution_id uuid
+
+  source_module varchar(100)
+
+  severity varchar(20)
+
+  event_type varchar(100)
+
+  message text
+
+  created_at timestamptz
+}
+
+Table application_metric {
+
+  id uuid [pk]
+
+  system_event_id uuid
+
+  metric_name varchar(100)
+
+  metric_value numeric(15,4)
+
+  metric_unit varchar(30)
+
+  recorded_at timestamptz
+}
+
+////////////////////////////////////////////////////////////
+//
+// DASHBOARD
+//
+////////////////////////////////////////////////////////////
+
+Table communication_stat {
+
+  id uuid [pk]
+
+  person_id uuid [unique]
+
+  total_notifications integer
+
+  successful_notifications integer
+
+  failed_notifications integer
+
+  total_voice_calls integer
+
+  accepted_calls integer
+
+  rejected_calls integer
+
+  timeout_calls integer
+
+  average_response_seconds integer
+
+  last_notification_at timestamptz
+
+  calculated_at timestamptz
+}
+
+////////////////////////////////////////////////////////////
+//
+// RELATIONS
+//
+////////////////////////////////////////////////////////////
+
+Ref: notification.routing_execution_id > routing_execution.id
+
+Ref: notification.alert_id > alert.id
+
+Ref: notification.template_id > notification_template.id
+
+Ref: notification.triggered_by_person_id > person.id
+
+Ref: notification_recipient.notification_id > notification.id
+
+Ref: notification_recipient.person_id > person.id
+
+Ref: notification_attempt.recipient_id > notification_recipient.id
+
+Ref: voice_message.notification_id > notification.id
+
+Ref: audit_log.actor_person_id > person.id
+
+Ref: audit_log.alert_id > alert.id
+
+Ref: audit_log.llm_execution_id > llm_execution.id
+
+Ref: audit_log.routing_execution_id > routing_execution.id
+
+Ref: audit_log.notification_id > notification.id
+
+Ref: audit_log_detail.audit_log_id > audit_log.id
+
+Ref: system_event.alert_id > alert.id
+
+Ref: system_event.llm_execution_id > llm_execution.id
+
+Ref: application_metric.system_event_id > system_event.id
+
+Ref: communication_stat.person_id > person.id
+
+Ref: llm_execution.alert_id > alert.id
+
+Ref: llm_execution.provider_id > ai_provider.id
+
+Ref: llm_execution.prompt_template_id > prompt_template.id
+
+Ref: prompt_context.execution_id > llm_execution.id
+
+Ref: llm_classification.execution_id > llm_execution.id
+
+Ref: llm_classification.solution_id > organizational_unit.id
+
+Ref: llm_classification.suggested_domain > organizational_unit.id
+
+Ref: llm_classification.suggested_pole > organizational_unit.id
+
+Ref: llm_classification.suggested_entity > organizational_unit.id
+
+Ref: llm_recommendation.classification_id > llm_classification.id
+
+Ref: rule_condition_group.rule_id > business_rule.id
+
+Ref: rule_condition.group_id > rule_condition_group.id
+
+Ref: rule_action.rule_id > business_rule.id
+
+Ref: rule_execution.rule_id > business_rule.id
+
+Ref: rule_execution.alert_id > alert.id
+
+Ref: rule_execution.classification_id > llm_classification.id
+
+Ref: routing_step.routing_policy_id > routing_policy.id
+
+Ref: routing_step.target_role > admin_role_type.code
+
+Ref: routing_execution.alert_id > alert.id
+
+Ref: routing_execution.classification_id > llm_classification.id
+
+Ref: routing_execution.routing_policy_id > routing_policy.id
+
+Ref: routing_execution.selected_solution_id > organizational_unit.id
+
+Ref: routing_execution.selected_person_id > person.id
+
+Ref: routing_history.routing_execution_id > routing_execution.id
+
+Ref: routing_history.routing_step_id > routing_step.id
+
+Ref: routing_history.target_person_id > person.id
+
+Ref: routing_history.target_unit_id > organizational_unit.id
+
+Ref: routing_response.routing_history_id > routing_history.id
+
+Ref: organizational_unit.parent_unit_id > organizational_unit.id
+
+Ref: solution_attribute.unit_id > organizational_unit.id
+
+Ref: unit_admin_assignment.unit_id > organizational_unit.id
+
+Ref: unit_admin_assignment.person_id > person.id
+
+Ref: unit_admin_assignment.role > admin_role_type.code
+
+Ref: member_availability.person_id > person.id
+
+Ref: alert.resolved_solution_id > organizational_unit.id
+
+Ref: alert_entity.alert_id > alert.id
+
+Ref: alert_comment.alert_id > alert.id
+
+Ref: alert_timeline.alert_id > alert.id
+
+Ref: alert_attachment.alert_id > alert.id
+
+// Note : rule_exception n'existe plus (voir bandeau d'en-tete). Toute FK ou
+// relation logique qui la referencait a ete retiree ; aucune reference
+// fantome ne subsiste dans ce document.

@@ -9,15 +9,15 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/security-probe")
 public class SecurityProbeController {
 
-    @GetMapping("/operator")
-    @PreAuthorize("hasRole('OPERATEUR')")
-    public String operatorEndpoint() {
-        return "operator-ok";
+    @GetMapping("/ops")
+    @PreAuthorize("hasRole('OPS')")
+    public String opsEndpoint() {
+        return "ops-ok";
     }
 
-    @GetMapping("/admin")
-    @PreAuthorize("hasRole('ADMINISTRATEUR')")
-    public String adminEndpoint() {
-        return "admin-ok";
+    @GetMapping("/supervisor")
+    @PreAuthorize("hasRole('SUPERVISOR')")
+    public String supervisorEndpoint() {
+        return "supervisor-ok";
     }
 }

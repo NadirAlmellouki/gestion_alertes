@@ -12,10 +12,8 @@ import java.util.UUID;
 
 public interface SpringDataAlertRepository extends JpaRepository<AlertEntity, UUID> {
 
-    Optional<AlertEntity> findByExternalProblemId(String externalProblemId);
-
     @EntityGraph(attributePaths = "timeline")
-    Optional<AlertEntity> findWithTimelineByExternalProblemId(String externalProblemId);
+    Optional<AlertEntity> findWithTimelineByProblemId(String problemId);
 
     List<AlertEntity> findByReceivedAtAfterOrderByReceivedAtDesc(Instant since);
 

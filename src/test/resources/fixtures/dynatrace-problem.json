@@ -1,34 +1,58 @@
 {
-  "PID": "1234567890123456789",
-  "ProblemID": "P-20260729-001",
-  "ProblemTitle": "Saturation CPU détectée sur PayCore",
-  "ProblemSeverity": "RESOURCE_CONTENTION",
-  "ProblemImpact": "APPLICATION",
-  "State": "OPEN",
-  "ProblemURL": "https://dynatrace.example.com/ui/problems/P-20260729-001",
-  "ImpactedEntity": "PayCore",
-  "ImpactedEntityNames": "prd-app-paycore-01.bank.internal",
-  "ProblemDetailsJSONv2": {
-    "problemId": "1234567890123456789",
-    "title": "Saturation CPU détectée sur PayCore",
-    "severityLevel": "RESOURCE_CONTENTION",
-    "impactLevel": "APPLICATION",
-    "status": "OPEN",
-    "startTime": 1722000000000,
-    "affectedEntities": [
+  "problemId": "1234567890123456789",
+  "displayId": "P-20260729-001",
+  "title": "Saturation CPU détectée sur PayCore",
+  "impactLevel": "APPLICATION",
+  "severityLevel": "RESOURCE_CONTENTION",
+  "status": "OPEN",
+  "startTime": 1722000000000,
+  "endTime": 0,
+  "affectedEntities": [
+    {
+      "entityId": { "id": "HOST-ABC123", "type": "HOST" },
+      "name": "PayCore"
+    }
+  ],
+  "impactedEntities": [
+    {
+      "entityId": { "id": "SERVICE-XYZ", "type": "SERVICE" },
+      "name": "PayCore"
+    }
+  ],
+  "rootCauseEntity": {
+    "entityId": { "id": "HOST-ABC123", "type": "HOST" },
+    "name": "prd-app-paycore-01.bank.internal"
+  },
+  "entityTags": [
+    { "context": "CONTEXTLESS", "key": "environment", "value": "Production", "stringRepresentation": "environment:Production" }
+  ],
+  "managementZones": [
+    { "id": "mz-1", "name": "Production Banking" }
+  ],
+  "k8s.cluster.name": ["prod-cluster"],
+  "k8s.namespace.name": ["paycore"],
+  "evidenceDetails": {
+    "totalCount": 1,
+    "details": [
       {
-        "name": "PayCore",
-        "entityId": {
-          "id": "HOST-ABC123",
-          "type": "HOST"
+        "displayName": "CPU saturation",
+        "rootCauseRelevant": true,
+        "startTime": 1722000000000,
+        "entity": {
+          "entityId": { "id": "HOST-ABC123", "type": "HOST" },
+          "name": "prd-app-paycore-01.bank.internal"
         }
       }
-    ],
-    "entityTags": [
+    ]
+  },
+  "impactAnalysis": {
+    "impacts": [
       {
-        "context": "CONTEXTLESS",
-        "key": "environment",
-        "value": "Production"
+        "estimatedAffectedUsers": 1200,
+        "impactedEntity": {
+          "entityId": { "id": "SERVICE-XYZ", "type": "SERVICE" },
+          "name": "PayCore"
+        }
       }
     ]
   }

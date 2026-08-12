@@ -53,7 +53,7 @@ public class DynatraceAlertNormalizer {
                     text(root, "status")
             );
 
-            String problemUrl = firstNonBlank(
+            String problemUrl = firstNonBlankOrNull(
                     text(root, "ProblemURL"),
                     text(root, "problemUrl")
             );
@@ -64,13 +64,13 @@ public class DynatraceAlertNormalizer {
             Instant problemStartedAt = extractStartTime(problem);
 
             return new NormalizedAlertData(
-                    externalProblemId,
-                    title,
-                    applicationName,
+                    require(externalProblemId, "problemId"),
+                    require(title, "title"),
+                    nullIfUnknown(applicationName),
                     environment,
-                    severity,
-                    impact,
-                    state,
+                    nullIfUnknown(severity),
+                    nullIfUnknown(impact),
+                    nullIfUnknown(state),
                     problemUrl,
                     hostName,
                     jsonBody,
@@ -186,6 +186,26 @@ public class DynatraceAlertNormalizer {
             }
         }
         return "UNKNOWN";
+    }
+
+    private String firstNonBlankOrNull(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private String require(String value, String field) {
+        if (value == null || value.isBlank() || "UNKNOWN".equals(value)) {
+            throw new IllegalArgumentException("Missing required field: " + field);
+        }
+        return value;
+    }
+
+    private String nullIfUnknown(String value) {
+        return "UNKNOWN".equals(value) ? null : value;
     }
 
     public record NormalizedAlertData(
