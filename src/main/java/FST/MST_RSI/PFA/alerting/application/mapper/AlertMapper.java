@@ -2,9 +2,7 @@ package FST.MST_RSI.PFA.alerting.application.mapper;
 
 import FST.MST_RSI.PFA.alerting.application.dto.AlertDto;
 import FST.MST_RSI.PFA.alerting.application.dto.AlertSummaryDto;
-import FST.MST_RSI.PFA.alerting.application.dto.AlertTimelineEntryDto;
 import FST.MST_RSI.PFA.alerting.domain.model.Alert;
-import FST.MST_RSI.PFA.alerting.domain.model.AlertTimelineEntry;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -43,17 +41,7 @@ public class AlertMapper {
                 alert.getProblemUrl(),
                 alert.getHostName(),
                 alert.getReceivedAt(),
-                alert.getProblemStartedAt(),
-                alert.getTimeline().stream().map(this::toTimelineEntry).toList()
-        );
-    }
-
-    private AlertTimelineEntryDto toTimelineEntry(AlertTimelineEntry entry) {
-        return new AlertTimelineEntryDto(
-                entry.getId() == null ? null : entry.getId().toString(),
-                entry.getEventType(),
-                entry.getMessage(),
-                entry.getOccurredAt()
+                alert.getProblemStartedAt()
         );
     }
 }

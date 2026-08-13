@@ -13,9 +13,10 @@
 //   - alert : ajout linked_problem_id (corrélation d'alertes liées)
 //   - alert_entity : ajout entity_role (distingue affectedEntities/impactedEntities/
 //     rootCauseEntity/evidenceDetails.details du JSON Dynatrace)
-//   - llm_classification.business_priority SUPPRIMÉE : le LLM ne calcule/propose jamais
-//     de priorité métier (Master Prompt V2). La seule priorité métier valide est
-//     solution_attribute.psi (donnée fixe du référentiel).
+// V0 simplification (2026-08):
+//   - alert_timeline SUPPRIMÉE : timeline reconstruite via audit_log, system_event, routing_history, notification
+//   - alert_attachment SUPPRIMÉE : hors périmètre V0
+//   - llm_execution + llm_classification + llm_recommendation fusionnées dans alert_llm_analysis
 //   - business_rule.priority renommée rule_evaluation_priority : ordre d'évaluation de
 //     la règle uniquement, sans aucun rapport avec solution_attribute.psi
 //   - rule_exception (table à part, liste plate) supprimée et fusionnée dans
@@ -268,152 +269,65 @@ Table alert_comment {
   created_at timestamptz
 }
 
-Table alert_timeline {
-
-  id uuid [pk]
-
-  alert_id uuid
-
-  event_type varchar(100)
-
-  description text
-
-  event_time timestamptz
-
-  created_by varchar(255)
-}
-
-Table alert_attachment {
-
-  id uuid [pk]
-
-  alert_id uuid
-
-  attachment_type varchar(100)
-
-  file_name varchar(255)
-
-  storage_path varchar(500)
-
-  uploaded_at timestamptz
-}
-
 ////////////////////////////////////////////////////////////
 //
-// MLD GLOBAL
-// PARTIE 2
+// AI / LLM — résultat de classification par alerte (V0 simplifié)
+//
+// Le LLM ne calcule et ne propose JAMAIS de priorité métier (Master Prompt V2).
+// Il ne peut que proposer une Solution/Domaine/Pôle/Entité candidats parmi le référentiel.
+// Une alerte possède une analyse LLM principale persistée dans alert_llm_analysis.
 //
 ////////////////////////////////////////////////////////////
 
-
-////////////////////////////////////////////////////////////
-//
-// AI / LLM
-//
-// Le LLM ne calcule et ne propose JAMAIS de priorite metier (Master Prompt V2) :
-// llm_classification ne porte donc aucune colonne "priority"/"business_priority".
-// Il ne peut que proposer une Solution/Domaine/Pole/Entite candidats parmi les
-// valeurs existantes du referentiel (jamais inventees).
-//
-////////////////////////////////////////////////////////////
-
-Table ai_provider {
+Table alert_llm_analysis {
 
   id uuid [pk]
 
-  code varchar(50) [unique]
+  alert_id uuid [not null]
 
-  label varchar(150)
+  provider varchar(50) [not null]
 
-  endpoint varchar(500)
+  prompt_version varchar(50) [not null]
 
-  enabled boolean
-}
-
-Table prompt_template {
-
-  id uuid [pk]
-
-  version varchar(50)
-
-  name varchar(255)
-
-  description text
-
-  system_prompt text
-
-  active boolean
-
-  created_at timestamptz
-}
-
-Table llm_execution {
-
-  id uuid [pk]
-
-  alert_id uuid
-
-  provider_id uuid
-
-  prompt_template_id uuid
-
-  execution_time integer
+  duration_ms integer
 
   input_tokens integer
 
   output_tokens integer
 
-  status varchar(30)
+  status varchar(30) [not null, note: 'SUCCESS | FALLBACK | ...']
 
-  created_at timestamptz
+  category varchar(50)
+
+  problem_type varchar(100)
+
+  confidence decimal(7,6) [note: '0.000000–1.000000']
+
+  matched_solution varchar(255)
+
+  matched_domain varchar(255)
+
+  matched_pole varchar(255)
+
+  matched_entity varchar(255)
+
+  resolved_psi varchar(50) [note: 'PSI officiel depuis solution_attribute, jamais depuis le LLM']
+
+  summary text
+
+  probable_cause text
+
+  justification text
+
+  uncertain_fields jsonb
+
+  requires_human_validation boolean [default: false]
+
+  error_message text
+
+  created_at timestamptz [not null]
 }
 
-Table prompt_context {
-
-  id uuid [pk]
-
-  execution_id uuid
-
-  context_type varchar(100)
-
-  source varchar(100)
-
-  reference_id varchar(255)
-
-  content text
-}
-
-Table llm_classification {
-
-  id uuid [pk]
-
-  execution_id uuid
-
-  solution_id uuid [note: 'Solution CANDIDATE proposee par le LLM — jamais une priorite, jamais une donnee inventee hors referentiel']
-
-  confidence decimal(5,2) [note: 'CHECK 0-100']
-
-  reasoning text
-
-  suggested_domain uuid
-
-  suggested_pole uuid
-
-  suggested_entity uuid
-}
-
-Table llm_recommendation {
-
-  id uuid [pk]
-
-  classification_id uuid
-
-  recommendation_type varchar(100)
-
-  content text
-
-  confidence decimal(5,2)
-}
 
 ////////////////////////////////////////////////////////////
 //
@@ -422,16 +336,10 @@ Table llm_recommendation {
 // Business Rule
 //     |
 //     +-- Condition Groups (rule_condition_group, block_type = CONDITION)
-//     |       +-- rule_condition (operateur AND/OR porte par le groupe)
 //     |
 //     +-- Exceptions (rule_condition_group, block_type = EXCEPTION)
-//     |       +-- rule_condition (meme modele que les conditions)
 //     |
-//     +-- Actions (rule_action) — ne modifient JAMAIS Solution/Domaine/Pole/
-//         Entite/PSI (voir CHECK chk_rule_action_type_not_referential)
-//
-// Une regle s'applique si ses groupes CONDITION sont satisfaits ET qu'aucun de
-// ses groupes EXCEPTION n'est vrai.
+//     +-- Actions (rule_action)
 //
 ////////////////////////////////////////////////////////////
 
@@ -514,7 +422,7 @@ Table rule_execution {
 
   alert_id uuid
 
-  classification_id uuid
+  llm_analysis_id uuid
 
   matched boolean
 
@@ -571,7 +479,7 @@ Table routing_execution {
 
   alert_id uuid
 
-  classification_id uuid
+  llm_analysis_id uuid
 
   routing_policy_id uuid
 
@@ -747,7 +655,7 @@ Table audit_log {
 
   alert_id uuid
 
-  llm_execution_id uuid
+  llm_analysis_id uuid
 
   routing_execution_id uuid
 
@@ -791,7 +699,7 @@ Table system_event {
 
   alert_id uuid
 
-  llm_execution_id uuid
+  llm_analysis_id uuid
 
   source_module varchar(100)
 
@@ -878,7 +786,7 @@ Ref: audit_log.actor_person_id > person.id
 
 Ref: audit_log.alert_id > alert.id
 
-Ref: audit_log.llm_execution_id > llm_execution.id
+Ref: audit_log.llm_analysis_id > alert_llm_analysis.id
 
 Ref: audit_log.routing_execution_id > routing_execution.id
 
@@ -888,31 +796,13 @@ Ref: audit_log_detail.audit_log_id > audit_log.id
 
 Ref: system_event.alert_id > alert.id
 
-Ref: system_event.llm_execution_id > llm_execution.id
+Ref: system_event.llm_analysis_id > alert_llm_analysis.id
 
 Ref: application_metric.system_event_id > system_event.id
 
 Ref: communication_stat.person_id > person.id
 
-Ref: llm_execution.alert_id > alert.id
-
-Ref: llm_execution.provider_id > ai_provider.id
-
-Ref: llm_execution.prompt_template_id > prompt_template.id
-
-Ref: prompt_context.execution_id > llm_execution.id
-
-Ref: llm_classification.execution_id > llm_execution.id
-
-Ref: llm_classification.solution_id > organizational_unit.id
-
-Ref: llm_classification.suggested_domain > organizational_unit.id
-
-Ref: llm_classification.suggested_pole > organizational_unit.id
-
-Ref: llm_classification.suggested_entity > organizational_unit.id
-
-Ref: llm_recommendation.classification_id > llm_classification.id
+Ref: alert_llm_analysis.alert_id > alert.id
 
 Ref: rule_condition_group.rule_id > business_rule.id
 
@@ -924,7 +814,7 @@ Ref: rule_execution.rule_id > business_rule.id
 
 Ref: rule_execution.alert_id > alert.id
 
-Ref: rule_execution.classification_id > llm_classification.id
+Ref: rule_execution.llm_analysis_id > alert_llm_analysis.id
 
 Ref: routing_step.routing_policy_id > routing_policy.id
 
@@ -932,7 +822,7 @@ Ref: routing_step.target_role > admin_role_type.code
 
 Ref: routing_execution.alert_id > alert.id
 
-Ref: routing_execution.classification_id > llm_classification.id
+Ref: routing_execution.llm_analysis_id > alert_llm_analysis.id
 
 Ref: routing_execution.routing_policy_id > routing_policy.id
 
@@ -967,11 +857,3 @@ Ref: alert.resolved_solution_id > organizational_unit.id
 Ref: alert_entity.alert_id > alert.id
 
 Ref: alert_comment.alert_id > alert.id
-
-Ref: alert_timeline.alert_id > alert.id
-
-Ref: alert_attachment.alert_id > alert.id
-
-// Note : rule_exception n'existe plus (voir bandeau d'en-tete). Toute FK ou
-// relation logique qui la referencait a ete retiree ; aucune reference
-// fantome ne subsiste dans ce document.

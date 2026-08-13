@@ -8,4 +8,6 @@ import java.util.UUID;
 public interface UnitAdminAssignmentRepository extends JpaRepository<UnitAdminAssignmentEntity, UUID> {
 
     Optional<UnitAdminAssignmentEntity> findByUnitIdAndPersonIdAndRole(UUID unitId, UUID personId, String role);
+
+    java.util.List<UnitAdminAssignmentEntity> findByUnitIdAndRoleAndActiveTrueOrderByPrimaryContactDesc(UUID unitId, String role);
 }

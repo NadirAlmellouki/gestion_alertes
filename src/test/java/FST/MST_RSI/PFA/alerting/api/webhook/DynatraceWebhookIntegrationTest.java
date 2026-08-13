@@ -45,9 +45,8 @@ class DynatraceWebhookIntegrationTest {
                 .andExpect(jsonPath("$.externalProblemId").value("1234567890123456789"))
                 .andExpect(jsonPath("$.created").value(true));
 
-        AlertEntity alert = alertRepository.findWithTimelineByProblemId("1234567890123456789").orElseThrow();
+        AlertEntity alert = alertRepository.findByProblemId("1234567890123456789").orElseThrow();
         assertThat(alert.getNotificationState()).isEqualTo(NotificationState.EN_ATTENTE);
-        assertThat(alert.getTimeline()).isNotEmpty();
     }
 
     @Test

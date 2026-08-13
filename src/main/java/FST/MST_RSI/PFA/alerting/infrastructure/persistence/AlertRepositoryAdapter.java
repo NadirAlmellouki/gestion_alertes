@@ -2,8 +2,6 @@ package FST.MST_RSI.PFA.alerting.infrastructure.persistence;
 
 import FST.MST_RSI.PFA.alerting.domain.model.Alert;
 import FST.MST_RSI.PFA.alerting.domain.model.AlertId;
-import FST.MST_RSI.PFA.alerting.domain.model.AlertTimelineEntry;
-import FST.MST_RSI.PFA.alerting.domain.model.TimelineEventType;
 import FST.MST_RSI.PFA.alerting.domain.port.AlertRepositoryPort;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -36,28 +34,18 @@ public class AlertRepositoryAdapter implements AlertRepositoryPort {
                 .orElseGet(AlertEntity::new);
 
         mapToEntity(alert, entity);
-        entity.getTimeline().clear();
-        for (AlertTimelineEntry entry : alert.getTimeline()) {
-            entity.getTimeline().add(new AlertTimelineEntryEntity(
-                    entity,
-                    entry.getEventType(),
-                    entry.getMessage(),
-                    entry.getOccurredAt()
-            ));
-        }
-
         AlertEntity saved = repository.save(entity);
         return mapToDomain(saved);
     }
 
     @Override
     public Optional<Alert> findById(AlertId id) {
-        return repository.findWithTimelineById(id.value()).map(this::mapToDomain);
+        return repository.findById(id.value()).map(this::mapToDomain);
     }
 
     @Override
     public Optional<Alert> findByExternalProblemId(String externalProblemId) {
-        return repository.findWithTimelineByProblemId(externalProblemId).map(this::mapToDomain);
+        return repository.findByProblemId(externalProblemId).map(this::mapToDomain);
     }
 
     @Override
@@ -99,15 +87,6 @@ public class AlertRepositoryAdapter implements AlertRepositoryPort {
     private Alert mapToDomain(AlertEntity entity) {
         JsonNode root = payloadReader.readTree(entity.getRawPayload());
 
-        List<AlertTimelineEntry> timeline = entity.getTimeline().stream()
-                .map(entry -> new AlertTimelineEntry(
-                        entry.getId(),
-                        entry.getEventType(),
-                        entry.getDescription(),
-                        entry.getEventTime()
-                ))
-                .toList();
-
         return Alert.restore(
                 new AlertId(entity.getId()),
                 entity.getProblemId(),
@@ -122,8 +101,7 @@ public class AlertRepositoryAdapter implements AlertRepositoryPort {
                 payloadReader.extractHostName(root),
                 entity.getRawPayload(),
                 entity.getReceivedAt(),
-                entity.getStartTime(),
-                timeline
+                entity.getStartTime()
         );
     }
 

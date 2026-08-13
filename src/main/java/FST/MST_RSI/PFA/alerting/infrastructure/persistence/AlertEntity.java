@@ -1,22 +1,16 @@
 package FST.MST_RSI.PFA.alerting.infrastructure.persistence;
 
 import FST.MST_RSI.PFA.alerting.domain.model.NotificationState;
-import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
-import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
-import jakarta.persistence.OneToMany;
-import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -81,10 +75,6 @@ public class AlertEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "notification_state", nullable = false, length = 30)
     private NotificationState notificationState = NotificationState.EN_ATTENTE;
-
-    @OneToMany(mappedBy = "alert", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
-    @OrderBy("eventTime ASC")
-    private List<AlertTimelineEntryEntity> timeline = new ArrayList<>();
 
     protected AlertEntity() {
     }
@@ -231,13 +221,5 @@ public class AlertEntity {
 
     public void setNotificationState(NotificationState notificationState) {
         this.notificationState = notificationState;
-    }
-
-    public List<AlertTimelineEntryEntity> getTimeline() {
-        return timeline;
-    }
-
-    public void setTimeline(List<AlertTimelineEntryEntity> timeline) {
-        this.timeline = timeline;
     }
 }

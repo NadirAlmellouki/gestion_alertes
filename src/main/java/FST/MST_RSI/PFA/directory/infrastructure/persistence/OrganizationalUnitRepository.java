@@ -18,5 +18,7 @@ public interface OrganizationalUnitRepository extends JpaRepository<Organization
 
     Optional<OrganizationalUnitEntity> findByCode(String code);
 
+    java.util.List<OrganizationalUnitEntity> findByUnitTypeAndNameIgnoreCaseAndActiveTrue(String unitType, String name);
+
     List<OrganizationalUnitEntity> findByUnitTypeAndActiveTrue(String unitType);
 }

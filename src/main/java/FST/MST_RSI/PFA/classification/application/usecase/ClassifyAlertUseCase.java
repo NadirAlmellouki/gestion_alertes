@@ -12,6 +12,7 @@ import FST.MST_RSI.PFA.classification.domain.model.SolutionContext;
 import FST.MST_RSI.PFA.classification.domain.port.AlertClassifierPort;
 import FST.MST_RSI.PFA.classification.domain.port.BusinessContextPort;
 import FST.MST_RSI.PFA.classification.domain.service.ClassificationPromptBuilder;
+import FST.MST_RSI.PFA.classification.infrastructure.persistence.AlertLlmAnalysisPersistenceAdapter;
 import FST.MST_RSI.PFA.common.exception.ResourceNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,6 +32,7 @@ public class ClassifyAlertUseCase {
     private final AlertContextExtractor alertContextExtractor;
     private final BusinessContextPort businessContextPort;
     private final AlertClassifierPort alertClassifierPort;
+    private final AlertLlmAnalysisPersistenceAdapter llmAnalysisPersistenceAdapter;
     private final ApplicationEventPublisher eventPublisher;
     private final String promptVersion;
     private final String provider;
@@ -40,6 +42,7 @@ public class ClassifyAlertUseCase {
             AlertContextExtractor alertContextExtractor,
             BusinessContextPort businessContextPort,
             AlertClassifierPort alertClassifierPort,
+            AlertLlmAnalysisPersistenceAdapter llmAnalysisPersistenceAdapter,
             ApplicationEventPublisher eventPublisher,
             @Value("${app.classification.prompt-version:v2}") String promptVersion,
             @Value("${app.llm.provider:gemini}") String provider
@@ -48,12 +51,13 @@ public class ClassifyAlertUseCase {
         this.alertContextExtractor = alertContextExtractor;
         this.businessContextPort = businessContextPort;
         this.alertClassifierPort = alertClassifierPort;
+        this.llmAnalysisPersistenceAdapter = llmAnalysisPersistenceAdapter;
         this.eventPublisher = eventPublisher;
         this.promptVersion = promptVersion;
         this.provider = provider;
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public ClassificationResult execute(String alertId) {
         Alert alert = alertRepositoryPort.findById(AlertId.of(alertId))
                 .orElseThrow(() -> new ResourceNotFoundException("Alert not found: " + alertId));
@@ -72,6 +76,18 @@ public class ClassifyAlertUseCase {
         result = enrichWithOfficialPsi(result);
         long duration = System.currentTimeMillis() - started;
 
+        String effectivePromptVersion = promptVersion.isBlank()
+                ? ClassificationPromptBuilder.PROMPT_VERSION
+                : promptVersion;
+
+        llmAnalysisPersistenceAdapter.save(
+                alert.getId().value(),
+                result,
+                provider,
+                effectivePromptVersion,
+                duration
+        );
+
         eventPublisher.publishEvent(new AlertClassifiedEvent(
                 alert.getId(),
                 result.category(),
@@ -79,7 +95,7 @@ public class ClassifyAlertUseCase {
                 result.matchedSolution(),
                 result.resolvedPsi(),
                 result.status(),
-                promptVersion.isBlank() ? ClassificationPromptBuilder.PROMPT_VERSION : promptVersion,
+                effectivePromptVersion,
                 provider,
                 duration
         ));

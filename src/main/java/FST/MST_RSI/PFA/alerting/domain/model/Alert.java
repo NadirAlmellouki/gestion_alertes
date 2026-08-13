@@ -1,9 +1,6 @@
 package FST.MST_RSI.PFA.alerting.domain.model;
 
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
 import java.util.Objects;
 
 public class Alert {
@@ -22,7 +19,6 @@ public class Alert {
     private String rawPayload;
     private final Instant receivedAt;
     private Instant problemStartedAt;
-    private final List<AlertTimelineEntry> timeline;
 
     private Alert(
             AlertId id,
@@ -38,8 +34,7 @@ public class Alert {
             String hostName,
             String rawPayload,
             Instant receivedAt,
-            Instant problemStartedAt,
-            List<AlertTimelineEntry> timeline
+            Instant problemStartedAt
     ) {
         this.id = id;
         this.externalProblemId = externalProblemId;
@@ -55,7 +50,6 @@ public class Alert {
         this.rawPayload = rawPayload;
         this.receivedAt = receivedAt;
         this.problemStartedAt = problemStartedAt;
-        this.timeline = new ArrayList<>(timeline);
     }
 
     public static Alert createNew(
@@ -72,7 +66,7 @@ public class Alert {
             Instant problemStartedAt
     ) {
         Instant now = Instant.now();
-        Alert alert = new Alert(
+        return new Alert(
                 AlertId.generate(),
                 externalProblemId,
                 title,
@@ -86,11 +80,8 @@ public class Alert {
                 hostName,
                 rawPayload,
                 now,
-                problemStartedAt,
-                new ArrayList<>()
+                problemStartedAt
         );
-        alert.addTimelineEntry(TimelineEventType.RECEIVED, "Alerte reçue depuis Dynatrace");
-        return alert;
     }
 
     public static Alert restore(
@@ -107,8 +98,7 @@ public class Alert {
             String hostName,
             String rawPayload,
             Instant receivedAt,
-            Instant problemStartedAt,
-            List<AlertTimelineEntry> timeline
+            Instant problemStartedAt
     ) {
         return new Alert(
                 id,
@@ -124,8 +114,7 @@ public class Alert {
                 hostName,
                 rawPayload,
                 receivedAt,
-                problemStartedAt,
-                timeline
+                problemStartedAt
         );
     }
 
@@ -151,11 +140,6 @@ public class Alert {
         this.hostName = hostName;
         this.rawPayload = rawPayload;
         this.problemStartedAt = problemStartedAt;
-        addTimelineEntry(TimelineEventType.UPDATED, "Mise à jour reçue depuis Dynatrace");
-    }
-
-    public void addTimelineEntry(TimelineEventType eventType, String message) {
-        timeline.add(new AlertTimelineEntry(eventType, message, Instant.now()));
     }
 
     public AlertId getId() {
@@ -212,10 +196,6 @@ public class Alert {
 
     public Instant getProblemStartedAt() {
         return problemStartedAt;
-    }
-
-    public List<AlertTimelineEntry> getTimeline() {
-        return Collections.unmodifiableList(timeline);
     }
 
     @Override

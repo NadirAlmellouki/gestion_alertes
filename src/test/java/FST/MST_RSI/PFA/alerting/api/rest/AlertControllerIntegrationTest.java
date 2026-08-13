@@ -57,8 +57,7 @@ class AlertControllerIntegrationTest {
         mockMvc.perform(get("/api/v1/alerts/" + alertId)
                         .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_OPS"))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.title").value("Saturation CPU détectée sur PayCore"))
-                .andExpect(jsonPath("$.timeline[0].eventType").value("RECEIVED"));
+                .andExpect(jsonPath("$.title").value("Saturation CPU détectée sur PayCore"));
     }
 
     @Test

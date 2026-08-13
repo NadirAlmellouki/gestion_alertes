@@ -8,11 +8,17 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 @SpringBootApplication
 @EntityScan(basePackages = {
         "FST.MST_RSI.PFA.alerting.infrastructure.persistence",
-        "FST.MST_RSI.PFA.directory.infrastructure.persistence"
+        "FST.MST_RSI.PFA.directory.infrastructure.persistence",
+        "FST.MST_RSI.PFA.classification.infrastructure.persistence",
+        "FST.MST_RSI.PFA.rulesengine.infrastructure.persistence",
+        "FST.MST_RSI.PFA.routingengine.infrastructure.persistence"
 })
 @EnableJpaRepositories(basePackages = {
         "FST.MST_RSI.PFA.alerting.infrastructure.persistence",
-        "FST.MST_RSI.PFA.directory.infrastructure.persistence"
+        "FST.MST_RSI.PFA.directory.infrastructure.persistence",
+        "FST.MST_RSI.PFA.classification.infrastructure.persistence",
+        "FST.MST_RSI.PFA.rulesengine.infrastructure.persistence",
+        "FST.MST_RSI.PFA.routingengine.infrastructure.persistence"
 })
 public class AlertOpsApplication {
     public static void main(String[] args) {

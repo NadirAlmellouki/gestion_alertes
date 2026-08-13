@@ -2,7 +2,6 @@ package FST.MST_RSI.PFA.alerting.infrastructure.persistence;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.time.Instant;
@@ -12,13 +11,9 @@ import java.util.UUID;
 
 public interface SpringDataAlertRepository extends JpaRepository<AlertEntity, UUID> {
 
-    @EntityGraph(attributePaths = "timeline")
-    Optional<AlertEntity> findWithTimelineByProblemId(String problemId);
+    Optional<AlertEntity> findByProblemId(String problemId);
 
     List<AlertEntity> findByReceivedAtAfterOrderByReceivedAtDesc(Instant since);
 
     Page<AlertEntity> findByReceivedAtBetweenOrderByReceivedAtDesc(Instant from, Instant to, Pageable pageable);
-
-    @EntityGraph(attributePaths = "timeline")
-    Optional<AlertEntity> findWithTimelineById(UUID id);
 }
