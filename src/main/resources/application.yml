@@ -89,3 +89,14 @@ app:
   ingestion:
     dynatrace:
       token: ${DYNATRACE_INGESTION_TOKEN:dev-ingestion-token}
+  notification:
+    email:
+      enabled: true
+      from: ${ALERTOPS_EMAIL_FROM:alertops@localhost}
+    sms:
+      enabled: true
+      app-name: alertops
+      event-key: FLASH_NOTIFICATION_EVENT
+      event-id: KRAKEN_NOTIFICATION_SENDING
+      kafka:
+        topic: ${ALERTOPS_SMS_TOPIC:alertops-sms-notifications}

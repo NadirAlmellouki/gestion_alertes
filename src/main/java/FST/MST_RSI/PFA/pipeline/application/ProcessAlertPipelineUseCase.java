@@ -8,6 +8,7 @@ import FST.MST_RSI.PFA.classification.domain.model.ClassificationResult;
 import FST.MST_RSI.PFA.classification.infrastructure.persistence.AlertLlmAnalysisEntity;
 import FST.MST_RSI.PFA.classification.infrastructure.persistence.AlertLlmAnalysisRepository;
 import FST.MST_RSI.PFA.common.exception.ResourceNotFoundException;
+import FST.MST_RSI.PFA.notification.application.usecase.ExecuteNotificationWorkflowUseCase;
 import FST.MST_RSI.PFA.routingengine.domain.model.RoutingContext;
 import FST.MST_RSI.PFA.routingengine.domain.model.RoutingDecision;
 import FST.MST_RSI.PFA.routingengine.domain.service.PersonResolver;
@@ -33,6 +34,7 @@ public class ProcessAlertPipelineUseCase {
     private final BusinessRuleEngine businessRuleEngine;
     private final PersonResolver personResolver;
     private final RoutingEngine routingEngine;
+    private final ExecuteNotificationWorkflowUseCase executeNotificationWorkflowUseCase;
 
     public ProcessAlertPipelineUseCase(
             AlertRepositoryPort alertRepositoryPort,
@@ -41,7 +43,8 @@ public class ProcessAlertPipelineUseCase {
             BusinessRuleContextBuilder businessRuleContextBuilder,
             BusinessRuleEngine businessRuleEngine,
             PersonResolver personResolver,
-            RoutingEngine routingEngine
+            RoutingEngine routingEngine,
+            ExecuteNotificationWorkflowUseCase executeNotificationWorkflowUseCase
     ) {
         this.alertRepositoryPort = alertRepositoryPort;
         this.classifyAlertUseCase = classifyAlertUseCase;
@@ -50,6 +53,7 @@ public class ProcessAlertPipelineUseCase {
         this.businessRuleEngine = businessRuleEngine;
         this.personResolver = personResolver;
         this.routingEngine = routingEngine;
+        this.executeNotificationWorkflowUseCase = executeNotificationWorkflowUseCase;
     }
 
     @Transactional
@@ -78,10 +82,21 @@ public class ProcessAlertPipelineUseCase {
         );
         RoutingDecision routingDecision = routingEngine.buildRoutingDecision(routingContext);
 
-        log.info("Pipeline completed for alert {}: rule={}, routingStatus={}",
-                alertId, businessDecision.matchedRuleCode(), routingDecision.routingStatus());
+        ExecuteNotificationWorkflowUseCase.NotificationWorkflowResult notificationResult =
+                executeNotificationWorkflowUseCase.execute(
+                        new ExecuteNotificationWorkflowUseCase.NotificationWorkflowCommand(
+                                alert,
+                                classification,
+                                businessDecision,
+                                routingDecision
+                        )
+                );
 
-        return new PipelineResult(alertId, classification, businessDecision, routingDecision);
+        log.info("Pipeline completed for alert {}: rule={}, routingStatus={}, notificationOutcome={}",
+                alertId, businessDecision.matchedRuleCode(), routingDecision.routingStatus(),
+                notificationResult.outcome());
+
+        return new PipelineResult(alertId, classification, businessDecision, routingDecision, notificationResult);
     }
 
     private PersonResolver.HierarchyIds resolveHierarchy(BusinessRuleContext ruleContext) {
@@ -95,7 +110,8 @@ public class ProcessAlertPipelineUseCase {
             String alertId,
             ClassificationResult classification,
             BusinessDecision businessDecision,
-            RoutingDecision routingDecision
+            RoutingDecision routingDecision,
+            ExecuteNotificationWorkflowUseCase.NotificationWorkflowResult notificationResult
     ) {
     }
 }

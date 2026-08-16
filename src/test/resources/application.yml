@@ -18,6 +18,10 @@ spring:
   flyway:
     enabled: false
 
+  mail:
+    host: localhost
+    port: 1025
+
   autoconfigure:
     exclude:
       - org.springframework.boot.autoconfigure.kafka.KafkaAutoConfiguration
@@ -51,3 +55,9 @@ app:
   ingestion:
     dynatrace:
       token: test-ingestion-token
+  notification:
+    email:
+      enabled: true
+      from: alertops@test.local
+    sms:
+      enabled: false

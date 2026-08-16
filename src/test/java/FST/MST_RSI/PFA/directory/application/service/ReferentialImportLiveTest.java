@@ -2,6 +2,7 @@ package FST.MST_RSI.PFA.directory.application.service;
 
 import FST.MST_RSI.PFA.directory.application.dto.ReferentialImportReport;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,6 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Live import against the local PostgreSQL container (not H2).
  * Run: mvn test -Dtest=ReferentialImportLiveTest
  */
+@Tag("live")
 @SpringBootTest
 @ActiveProfiles("test")
 @TestPropertySource(properties = {

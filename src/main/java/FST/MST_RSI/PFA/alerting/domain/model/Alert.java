@@ -178,6 +178,18 @@ public class Alert {
         return notificationState;
     }
 
+    public void markNotificationInProgress() {
+        this.notificationState = NotificationState.EN_COURS;
+    }
+
+    public void markNotificationSent() {
+        this.notificationState = NotificationState.ENVOYEE;
+    }
+
+    public void markNotificationFailed() {
+        this.notificationState = NotificationState.ECHOUEE;
+    }
+
     public String getProblemUrl() {
         return problemUrl;
     }
