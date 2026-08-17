@@ -42,6 +42,12 @@ public class RoutingExecutionEntity {
     @Column(name = "finished_at")
     private Instant finishedAt;
 
+    @Column(name = "next_escalation_at")
+    private Instant nextEscalationAt;
+
+    @Column(name = "candidate_index", nullable = false)
+    private int candidateIndex;
+
     protected RoutingExecutionEntity() {
     }
 
@@ -66,11 +72,56 @@ public class RoutingExecutionEntity {
         entity.currentStep = currentStep;
         entity.routingStatus = routingStatus;
         entity.startedAt = startedAt;
+        entity.candidateIndex = 0;
         return entity;
     }
 
     public UUID getId() {
         return id;
+    }
+
+    public UUID getAlertId() {
+        return alertId;
+    }
+
+    public UUID getClassificationId() {
+        return classificationId;
+    }
+
+    public UUID getRoutingPolicyId() {
+        return routingPolicyId;
+    }
+
+    public UUID getSelectedSolutionId() {
+        return selectedSolutionId;
+    }
+
+    public UUID getSelectedPersonId() {
+        return selectedPersonId;
+    }
+
+    public int getCurrentStep() {
+        return currentStep;
+    }
+
+    public String getRoutingStatus() {
+        return routingStatus;
+    }
+
+    public Instant getStartedAt() {
+        return startedAt;
+    }
+
+    public Instant getFinishedAt() {
+        return finishedAt;
+    }
+
+    public Instant getNextEscalationAt() {
+        return nextEscalationAt;
+    }
+
+    public int getCandidateIndex() {
+        return candidateIndex;
     }
 
     public void setFinishedAt(Instant finishedAt) {
@@ -87,5 +138,13 @@ public class RoutingExecutionEntity {
 
     public void setCurrentStep(int currentStep) {
         this.currentStep = currentStep;
+    }
+
+    public void setNextEscalationAt(Instant nextEscalationAt) {
+        this.nextEscalationAt = nextEscalationAt;
+    }
+
+    public void setCandidateIndex(int candidateIndex) {
+        this.candidateIndex = candidateIndex;
     }
 }

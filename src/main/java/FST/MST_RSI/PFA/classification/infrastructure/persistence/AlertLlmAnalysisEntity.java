@@ -189,4 +189,16 @@ public class AlertLlmAnalysisEntity {
     public boolean isRequiresHumanValidation() {
         return requiresHumanValidation;
     }
+
+    public String getSummary() {
+        return summary;
+    }
+
+    public String getProbableCause() {
+        return probableCause;
+    }
+
+    public String getJustification() {
+        return justification;
+    }
 }

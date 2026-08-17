@@ -26,6 +26,14 @@ public record BusinessDecision(
         return new BusinessDecision(null, null, null, false, false, null, null, null, List.of(), null, List.of());
     }
 
+    public static BusinessDecision continueRouting(UUID solutionUnitId, String solutionName, String forcedRole) {
+        return new BusinessDecision(
+                null, null, null, false, true,
+                solutionUnitId, solutionName, forcedRole,
+                List.of(), null, List.of("TRIGGER_ROUTING")
+        );
+    }
+
     public BusinessDecision merge(BusinessDecision other) {
         List<String> actions = new ArrayList<>(appliedActions);
         actions.addAll(other.appliedActions());

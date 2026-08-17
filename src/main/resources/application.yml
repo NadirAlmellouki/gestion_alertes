@@ -100,3 +100,8 @@ app:
       event-id: KRAKEN_NOTIFICATION_SENDING
       kafka:
         topic: ${ALERTOPS_SMS_TOPIC:alertops-sms-notifications}
+  routing:
+    escalation:
+      enabled: true
+      poll-interval-ms: 30000
+      max-active-minutes: 1440
