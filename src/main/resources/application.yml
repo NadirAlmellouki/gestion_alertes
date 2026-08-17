@@ -105,3 +105,16 @@ app:
       enabled: true
       poll-interval-ms: 30000
       max-active-minutes: 1440
+  monitoring:
+    resolution-check:
+      enabled: true
+      initial-delay-seconds: 120
+      polling-interval-seconds: 300
+      max-duration-minutes: 1440
+      max-attempts: 288
+      poll-interval-ms: 60000
+    dynatrace:
+      enabled: false
+      base-url: ${DYNATRACE_BASE_URL:}
+      api-token: ${DYNATRACE_API_TOKEN:}
+      timeout-seconds: 15

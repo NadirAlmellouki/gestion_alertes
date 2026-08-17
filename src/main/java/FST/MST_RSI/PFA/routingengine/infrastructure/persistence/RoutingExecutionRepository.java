@@ -17,4 +17,11 @@ public interface RoutingExecutionRepository extends JpaRepository<RoutingExecuti
               AND e.nextEscalationAt <= :dueBefore
             """)
     List<RoutingExecutionEntity> findDueEscalations(@Param("dueBefore") Instant dueBefore);
+
+    @Query("""
+            SELECT e FROM RoutingExecutionEntity e
+            WHERE e.alertId = :alertId
+              AND e.routingStatus NOT IN ('COMPLETED', 'EXPIRED', 'NO_PERSON')
+            """)
+    List<RoutingExecutionEntity> findActiveByAlertId(@Param("alertId") UUID alertId);
 }

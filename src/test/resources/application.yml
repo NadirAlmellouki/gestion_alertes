@@ -64,3 +64,8 @@ app:
   routing:
     escalation:
       enabled: false
+  monitoring:
+    resolution-check:
+      enabled: false
+    dynatrace:
+      enabled: false

@@ -3,6 +3,7 @@ package FST.MST_RSI.PFA.notification.application.usecase;
 import FST.MST_RSI.PFA.alerting.domain.model.Alert;
 import FST.MST_RSI.PFA.alerting.domain.port.AlertRepositoryPort;
 import FST.MST_RSI.PFA.classification.domain.model.ClassificationResult;
+import FST.MST_RSI.PFA.monitoring.application.usecase.ScheduleResolutionCheckUseCase;
 import FST.MST_RSI.PFA.notification.application.service.EmailMessageComposer;
 import FST.MST_RSI.PFA.notification.application.service.SmsKafkaPayloadBuilder;
 import FST.MST_RSI.PFA.notification.domain.model.NotificationChannel;
@@ -45,6 +46,7 @@ public class ExecuteNotificationWorkflowUseCase {
     private final SmsKafkaPayloadBuilder smsKafkaPayloadBuilder;
     private final PersonRepository personRepository;
     private final AlertRepositoryPort alertRepositoryPort;
+    private final ScheduleResolutionCheckUseCase scheduleResolutionCheckUseCase;
 
     public ExecuteNotificationWorkflowUseCase(
             EmailNotificationPort emailNotificationPort,
@@ -54,7 +56,8 @@ public class ExecuteNotificationWorkflowUseCase {
             EmailMessageComposer emailMessageComposer,
             SmsKafkaPayloadBuilder smsKafkaPayloadBuilder,
             PersonRepository personRepository,
-            AlertRepositoryPort alertRepositoryPort
+            AlertRepositoryPort alertRepositoryPort,
+            ScheduleResolutionCheckUseCase scheduleResolutionCheckUseCase
     ) {
         this.emailNotificationPort = emailNotificationPort;
         this.smsNotificationPort = smsNotificationPort;
@@ -64,6 +67,7 @@ public class ExecuteNotificationWorkflowUseCase {
         this.smsKafkaPayloadBuilder = smsKafkaPayloadBuilder;
         this.personRepository = personRepository;
         this.alertRepositoryPort = alertRepositoryPort;
+        this.scheduleResolutionCheckUseCase = scheduleResolutionCheckUseCase;
     }
 
     @Transactional
@@ -158,6 +162,7 @@ public class ExecuteNotificationWorkflowUseCase {
             alert.markNotificationSent();
             alertRepositoryPort.save(alert);
             log.info("Email notification sent for alert {}", alert.getId().value());
+            scheduleResolutionCheck(alert);
             return NotificationWorkflowResult.emailSent(notification.id());
         }
 
@@ -220,6 +225,7 @@ public class ExecuteNotificationWorkflowUseCase {
             alert.markNotificationSent();
             alertRepositoryPort.save(alert);
             log.info("SMS Kafka notification published for alert {}", alert.getId().value());
+            scheduleResolutionCheck(alert);
             return NotificationWorkflowResult.smsSent(notification.id());
         }
 
@@ -250,7 +256,12 @@ public class ExecuteNotificationWorkflowUseCase {
         );
         notificationRepositoryPort.updateStatus(notification.id(), NotificationStatus.DEFERRED);
         alertRepositoryPort.save(alert);
+        scheduleResolutionCheck(alert);
         return NotificationWorkflowResult.deferred(channel.name(), notification.id());
+    }
+
+    private void scheduleResolutionCheck(Alert alert) {
+        scheduleResolutionCheckUseCase.execute(alert);
     }
 
     private static String buildFallbackBody(Alert alert, ClassificationResult classification, String recipientName) {

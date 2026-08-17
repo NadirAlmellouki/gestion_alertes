@@ -9,6 +9,7 @@ import FST.MST_RSI.PFA.classification.domain.model.ClassificationStatus;
 import FST.MST_RSI.PFA.common.domain.vo.Confidence;
 import FST.MST_RSI.PFA.directory.infrastructure.persistence.PersonEntity;
 import FST.MST_RSI.PFA.directory.infrastructure.persistence.PersonRepository;
+import FST.MST_RSI.PFA.monitoring.application.usecase.ScheduleResolutionCheckUseCase;
 import FST.MST_RSI.PFA.notification.application.service.EmailMessageComposer;
 import FST.MST_RSI.PFA.notification.application.service.SmsKafkaPayloadBuilder;
 import FST.MST_RSI.PFA.notification.domain.model.NotificationDeliveryResult;
@@ -63,6 +64,8 @@ class ExecuteNotificationWorkflowUseCaseTest {
     private PersonRepository personRepository;
     @Mock
     private AlertRepositoryPort alertRepositoryPort;
+    @Mock
+    private ScheduleResolutionCheckUseCase scheduleResolutionCheckUseCase;
 
     private ExecuteNotificationWorkflowUseCase useCase;
 
@@ -76,7 +79,8 @@ class ExecuteNotificationWorkflowUseCaseTest {
                 emailMessageComposer,
                 smsKafkaPayloadBuilder,
                 personRepository,
-                alertRepositoryPort
+                alertRepositoryPort,
+                scheduleResolutionCheckUseCase
         );
     }
 

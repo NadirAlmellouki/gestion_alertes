@@ -142,6 +142,10 @@ public class Alert {
         this.problemStartedAt = problemStartedAt;
     }
 
+    public void updateDynatraceState(String dynatraceState) {
+        this.dynatraceState = dynatraceState;
+    }
+
     public AlertId getId() {
         return id;
     }
