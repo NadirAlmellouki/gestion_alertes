@@ -61,6 +61,11 @@ app:
       from: alertops@test.local
     sms:
       enabled: false
+    voip:
+      enabled: false
+  voice:
+    tts:
+      provider: fake
   routing:
     escalation:
       enabled: false

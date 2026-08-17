@@ -79,6 +79,12 @@ app:
   voice:
     tts:
       provider: fake
+      elevenlabs:
+        api-key: ${ELEVENLABS_API_KEY:}
+        voice-id: ${ELEVENLABS_VOICE_ID:21m00Tcm4TlvDq8ikWAM}
+        model-id: eleven_multilingual_v2
+        base-url: https://api.elevenlabs.io
+        timeout-seconds: 30
   business-context:
     source: postgres
   classification:
@@ -100,6 +106,10 @@ app:
       event-id: KRAKEN_NOTIFICATION_SENDING
       kafka:
         topic: ${ALERTOPS_SMS_TOPIC:alertops-sms-notifications}
+    voip:
+      enabled: false
+      provider: local
+      gateway-url: ${VOIP_GATEWAY_URL:http://localhost:8088/api/v1/calls}
   routing:
     escalation:
       enabled: true

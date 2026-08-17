@@ -12,6 +12,7 @@ import FST.MST_RSI.PFA.directory.infrastructure.persistence.PersonRepository;
 import FST.MST_RSI.PFA.monitoring.application.usecase.ScheduleResolutionCheckUseCase;
 import FST.MST_RSI.PFA.notification.application.service.EmailMessageComposer;
 import FST.MST_RSI.PFA.notification.application.service.SmsKafkaPayloadBuilder;
+import FST.MST_RSI.PFA.notification.application.service.VoipMessageComposer;
 import FST.MST_RSI.PFA.notification.domain.model.NotificationDeliveryResult;
 import FST.MST_RSI.PFA.notification.domain.model.NotificationRecord;
 import FST.MST_RSI.PFA.notification.domain.model.NotificationStatus;
@@ -27,11 +28,15 @@ import FST.MST_RSI.PFA.routingengine.domain.model.RoutingDecision;
 import FST.MST_RSI.PFA.routingengine.domain.model.RoutingStepDefinition;
 import FST.MST_RSI.PFA.rulesengine.domain.model.BusinessDecision;
 import FST.MST_RSI.PFA.rulesengine.domain.model.RuleOrigin;
+import FST.MST_RSI.PFA.notification.domain.port.VoiceCallPort;
+import FST.MST_RSI.PFA.notification.infrastructure.config.VoipNotificationProperties;
+import FST.MST_RSI.PFA.voicemessage.domain.port.TextToSpeechPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.ObjectProvider;
 
 import java.time.Instant;
 import java.util.List;
@@ -42,6 +47,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -66,11 +72,24 @@ class ExecuteNotificationWorkflowUseCaseTest {
     private AlertRepositoryPort alertRepositoryPort;
     @Mock
     private ScheduleResolutionCheckUseCase scheduleResolutionCheckUseCase;
+    @Mock
+    private VoipMessageComposer voipMessageComposer;
+    @Mock
+    private TextToSpeechPort textToSpeechPort;
+    @Mock
+    private VoiceCallPort voiceCallPort;
+    @Mock
+    private ObjectProvider<VoiceCallPort> voiceCallPortProvider;
 
+    private VoipNotificationProperties voipProperties;
     private ExecuteNotificationWorkflowUseCase useCase;
 
     @BeforeEach
     void setUp() {
+        voipProperties = new VoipNotificationProperties();
+        voipProperties.setEnabled(false);
+        lenient().when(voiceCallPortProvider.getIfAvailable()).thenReturn(null);
+
         useCase = new ExecuteNotificationWorkflowUseCase(
                 emailNotificationPort,
                 smsNotificationPort,
@@ -80,7 +99,11 @@ class ExecuteNotificationWorkflowUseCaseTest {
                 smsKafkaPayloadBuilder,
                 personRepository,
                 alertRepositoryPort,
-                scheduleResolutionCheckUseCase
+                scheduleResolutionCheckUseCase,
+                voipProperties,
+                voipMessageComposer,
+                textToSpeechPort,
+                voiceCallPortProvider
         );
     }
 
@@ -144,6 +167,30 @@ class ExecuteNotificationWorkflowUseCaseTest {
     }
 
     @Test
+    void initiatesVoipWhenEnabled() {
+        UUID notificationId = UUID.randomUUID();
+        UUID personId = UUID.randomUUID();
+        Alert alert = sampleAlert();
+        voipProperties.setEnabled(true);
+        when(voiceCallPortProvider.getIfAvailable()).thenReturn(voiceCallPort);
+
+        PersonEntity person = org.mockito.Mockito.mock(PersonEntity.class);
+        org.mockito.Mockito.when(person.getPhone()).thenReturn("1001");
+        when(personRepository.findById(personId)).thenReturn(Optional.of(person));
+        when(voipMessageComposer.compose(any(), any(), any())).thenReturn("Message alerte");
+        when(textToSpeechPort.synthesize(any())).thenReturn(Optional.empty());
+        when(notificationRepositoryPort.createPending(any(), any(), eq(NotificationType.VOIP), eq(personId), eq("1001")))
+                .thenReturn(notificationRecord(notificationId));
+        when(voiceCallPort.call(any())).thenReturn(NotificationDeliveryResult.sent("call-1"));
+        when(alertRepositoryPort.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        var result = useCase.execute(command(alert, voipRoutingDecision(personId)));
+
+        assertThat(result.outcome()).isEqualTo("VOIP_SENT");
+        assertThat(alert.getNotificationState()).isEqualTo(NotificationState.ENVOYEE);
+    }
+
+    @Test
     void skipsWhenHumanValidationRequired() {
         Alert alert = sampleAlert();
         BusinessDecision decision = new BusinessDecision(
@@ -203,13 +250,21 @@ class ExecuteNotificationWorkflowUseCaseTest {
     }
 
     private static RoutingDecision voipRoutingDecision() {
-        return routingDecision("tam@example.com", "VOIP");
+        return voipRoutingDecision(UUID.randomUUID());
+    }
+
+    private static RoutingDecision voipRoutingDecision(UUID personId) {
+        return routingDecision(personId, "tam@example.com", "VOIP");
     }
 
     private static RoutingDecision routingDecision(String email, String channel) {
+        return routingDecision(UUID.randomUUID(), email, channel);
+    }
+
+    private static RoutingDecision routingDecision(UUID personId, String email, String channel) {
         return new RoutingDecision(
                 UUID.randomUUID(), UUID.randomUUID(), "POLICY", PolicyOrigin.DEFAULT,
-                UUID.randomUUID(), email, "Jane Doe", UUID.randomUUID(),
+                personId, email, "Jane Doe", UUID.randomUUID(),
                 new RoutingStepDefinition(UUID.randomUUID(), 1, "VOICE_CALL", "TAM", "SOLUTION", channel, 0),
                 List.of(), "STARTED"
         );

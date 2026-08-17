@@ -6,6 +6,7 @@ import FST.MST_RSI.PFA.classification.domain.model.ClassificationResult;
 import FST.MST_RSI.PFA.monitoring.application.usecase.ScheduleResolutionCheckUseCase;
 import FST.MST_RSI.PFA.notification.application.service.EmailMessageComposer;
 import FST.MST_RSI.PFA.notification.application.service.SmsKafkaPayloadBuilder;
+import FST.MST_RSI.PFA.notification.application.service.VoipMessageComposer;
 import FST.MST_RSI.PFA.notification.domain.model.NotificationChannel;
 import FST.MST_RSI.PFA.notification.domain.model.NotificationDeliveryRequest;
 import FST.MST_RSI.PFA.notification.domain.model.NotificationDeliveryResult;
@@ -13,17 +14,23 @@ import FST.MST_RSI.PFA.notification.domain.model.NotificationRecord;
 import FST.MST_RSI.PFA.notification.domain.model.NotificationStatus;
 import FST.MST_RSI.PFA.notification.domain.model.NotificationType;
 import FST.MST_RSI.PFA.notification.domain.model.SmsNotificationRequest;
+import FST.MST_RSI.PFA.notification.domain.model.VoiceCallRequest;
 import FST.MST_RSI.PFA.notification.domain.port.EmailNotificationPort;
 import FST.MST_RSI.PFA.notification.domain.port.NotificationRepositoryPort;
 import FST.MST_RSI.PFA.notification.domain.port.SmsNotificationPort;
+import FST.MST_RSI.PFA.notification.domain.port.VoiceCallPort;
+import FST.MST_RSI.PFA.notification.infrastructure.config.VoipNotificationProperties;
 import FST.MST_RSI.PFA.directory.infrastructure.persistence.PersonEntity;
 import FST.MST_RSI.PFA.directory.infrastructure.persistence.PersonRepository;
 import FST.MST_RSI.PFA.notification.infrastructure.persistence.NotificationTemplateEntity;
 import FST.MST_RSI.PFA.notification.infrastructure.persistence.NotificationTemplateJpaRepository;
 import FST.MST_RSI.PFA.routingengine.domain.model.RoutingDecision;
 import FST.MST_RSI.PFA.rulesengine.domain.model.BusinessDecision;
+import FST.MST_RSI.PFA.voicemessage.domain.model.TtsAudio;
+import FST.MST_RSI.PFA.voicemessage.domain.port.TextToSpeechPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,6 +44,7 @@ public class ExecuteNotificationWorkflowUseCase {
 
     private static final String EMAIL_PROVIDER = "smtp";
     private static final String SMS_PROVIDER = "kafka";
+    private static final String VOIP_PROVIDER = "voip";
 
     private final EmailNotificationPort emailNotificationPort;
     private final SmsNotificationPort smsNotificationPort;
@@ -47,6 +55,10 @@ public class ExecuteNotificationWorkflowUseCase {
     private final PersonRepository personRepository;
     private final AlertRepositoryPort alertRepositoryPort;
     private final ScheduleResolutionCheckUseCase scheduleResolutionCheckUseCase;
+    private final VoipNotificationProperties voipNotificationProperties;
+    private final VoipMessageComposer voipMessageComposer;
+    private final TextToSpeechPort textToSpeechPort;
+    private final ObjectProvider<VoiceCallPort> voiceCallPortProvider;
 
     public ExecuteNotificationWorkflowUseCase(
             EmailNotificationPort emailNotificationPort,
@@ -57,7 +69,11 @@ public class ExecuteNotificationWorkflowUseCase {
             SmsKafkaPayloadBuilder smsKafkaPayloadBuilder,
             PersonRepository personRepository,
             AlertRepositoryPort alertRepositoryPort,
-            ScheduleResolutionCheckUseCase scheduleResolutionCheckUseCase
+            ScheduleResolutionCheckUseCase scheduleResolutionCheckUseCase,
+            VoipNotificationProperties voipNotificationProperties,
+            VoipMessageComposer voipMessageComposer,
+            TextToSpeechPort textToSpeechPort,
+            ObjectProvider<VoiceCallPort> voiceCallPortProvider
     ) {
         this.emailNotificationPort = emailNotificationPort;
         this.smsNotificationPort = smsNotificationPort;
@@ -68,6 +84,10 @@ public class ExecuteNotificationWorkflowUseCase {
         this.personRepository = personRepository;
         this.alertRepositoryPort = alertRepositoryPort;
         this.scheduleResolutionCheckUseCase = scheduleResolutionCheckUseCase;
+        this.voipNotificationProperties = voipNotificationProperties;
+        this.voipMessageComposer = voipMessageComposer;
+        this.textToSpeechPort = textToSpeechPort;
+        this.voiceCallPortProvider = voiceCallPortProvider;
     }
 
     @Transactional
@@ -103,7 +123,7 @@ public class ExecuteNotificationWorkflowUseCase {
         return switch (channel) {
             case EMAIL -> sendEmail(alert, command.classification(), routingDecision);
             case SMS -> sendSms(alert, command.classification(), routingDecision);
-            case VOIP -> deferChannel(alert, routingDecision, channel);
+            case VOIP -> sendVoip(alert, command.classification(), routingDecision);
         };
     }
 
@@ -235,6 +255,83 @@ public class ExecuteNotificationWorkflowUseCase {
         return NotificationWorkflowResult.smsFailed(notification.id(), deliveryResult.errorMessage());
     }
 
+    private NotificationWorkflowResult sendVoip(
+            Alert alert,
+            ClassificationResult classification,
+            RoutingDecision routingDecision
+    ) {
+        if (!voipNotificationProperties.isEnabled()) {
+            return deferChannel(alert, routingDecision, NotificationChannel.VOIP);
+        }
+
+        VoiceCallPort voiceCallPort = voiceCallPortProvider.getIfAvailable();
+        if (voiceCallPort == null) {
+            return deferChannel(alert, routingDecision, NotificationChannel.VOIP);
+        }
+
+        UUID personId = routingDecision.selectedPersonId();
+        if (personId == null) {
+            alert.markNotificationFailed();
+            alertRepositoryPort.save(alert);
+            return NotificationWorkflowResult.skipped("NO_RECIPIENT_PERSON");
+        }
+
+        PersonEntity person = personRepository.findById(personId).orElse(null);
+        String phone = person != null ? person.getPhone() : null;
+        if (phone == null || phone.isBlank()) {
+            alert.markNotificationFailed();
+            alertRepositoryPort.save(alert);
+            return NotificationWorkflowResult.skipped("NO_RECIPIENT_PHONE");
+        }
+
+        String message = voipMessageComposer.compose(alert, classification, routingDecision.selectedPersonName());
+        TtsAudio audio = textToSpeechPort.synthesize(message).orElse(null);
+
+        NotificationRecord notification = notificationRepositoryPort.createPending(
+                alert.getId().value(),
+                routingDecision.routingExecutionId(),
+                NotificationType.VOIP,
+                personId,
+                phone
+        );
+
+        VoiceCallRequest callRequest = new VoiceCallRequest(
+                alert.getId().value(),
+                routingDecision.routingExecutionId(),
+                personId,
+                phone,
+                routingDecision.selectedPersonName(),
+                message,
+                audio != null ? audio.content() : null,
+                audio != null ? audio.contentType() : null,
+                alert.getId().value().toString()
+        );
+
+        NotificationDeliveryResult deliveryResult = voiceCallPort.call(callRequest);
+        notificationRepositoryPort.recordAttempt(
+                notification.id(),
+                1,
+                VOIP_PROVIDER,
+                deliveryResult.success() ? NotificationStatus.SENT : NotificationStatus.FAILED,
+                deliveryResult.providerMessageId(),
+                deliveryResult.errorMessage()
+        );
+
+        if (deliveryResult.success()) {
+            notificationRepositoryPort.updateStatus(notification.id(), NotificationStatus.SENT);
+            alert.markNotificationSent();
+            alertRepositoryPort.save(alert);
+            log.info("VoIP call initiated for alert {} to extension {}", alert.getId().value(), phone);
+            scheduleResolutionCheck(alert);
+            return NotificationWorkflowResult.voipSent(notification.id());
+        }
+
+        notificationRepositoryPort.updateStatus(notification.id(), NotificationStatus.FAILED);
+        alert.markNotificationFailed();
+        alertRepositoryPort.save(alert);
+        return NotificationWorkflowResult.voipFailed(notification.id(), deliveryResult.errorMessage());
+    }
+
     private NotificationWorkflowResult deferChannel(
             Alert alert,
             RoutingDecision routingDecision,
@@ -319,6 +416,14 @@ public class ExecuteNotificationWorkflowUseCase {
 
         public static NotificationWorkflowResult deferred(String channel, UUID notificationId) {
             return new NotificationWorkflowResult("DEFERRED_" + channel, notificationId, NotificationStatus.DEFERRED, null);
+        }
+
+        public static NotificationWorkflowResult voipSent(UUID notificationId) {
+            return new NotificationWorkflowResult("VOIP_SENT", notificationId, NotificationStatus.SENT, null);
+        }
+
+        public static NotificationWorkflowResult voipFailed(UUID notificationId, String detail) {
+            return new NotificationWorkflowResult("VOIP_FAILED", notificationId, NotificationStatus.FAILED, detail);
         }
     }
 }

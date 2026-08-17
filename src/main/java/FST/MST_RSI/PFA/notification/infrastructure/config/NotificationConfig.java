@@ -7,6 +7,6 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
-@EnableConfigurationProperties({EmailNotificationProperties.class, SmsNotificationProperties.class})
+@EnableConfigurationProperties({EmailNotificationProperties.class, SmsNotificationProperties.class, VoipNotificationProperties.class})
 public class NotificationConfig {
 }
