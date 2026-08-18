@@ -3,6 +3,7 @@ package FST.MST_RSI.PFA.monitoring.application.usecase;
 import FST.MST_RSI.PFA.alerting.domain.model.Alert;
 import FST.MST_RSI.PFA.alerting.domain.model.AlertId;
 import FST.MST_RSI.PFA.alerting.domain.port.AlertRepositoryPort;
+import FST.MST_RSI.PFA.audit.application.service.AuditRecorder;
 import FST.MST_RSI.PFA.monitoring.domain.model.DynatraceProblemSnapshot;
 import FST.MST_RSI.PFA.monitoring.domain.model.ResolutionCheckStatus;
 import FST.MST_RSI.PFA.monitoring.domain.port.DynatraceProblemPort;
@@ -43,6 +44,8 @@ class ProcessResolutionCheckUseCaseTest {
     private RoutingExecutionRepository routingExecutionRepository;
     @Mock
     private RoutingEscalationEngine routingEscalationEngine;
+    @Mock
+    private AuditRecorder auditRecorder;
 
     private ResolutionCheckProperties properties;
     private ProcessResolutionCheckUseCase useCase;
@@ -62,7 +65,8 @@ class ProcessResolutionCheckUseCaseTest {
                 alertRepositoryPort,
                 routingExecutionRepository,
                 routingEscalationEngine,
-                properties
+                properties,
+                auditRecorder
         );
         lenient().when(resolutionCheckRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
     }

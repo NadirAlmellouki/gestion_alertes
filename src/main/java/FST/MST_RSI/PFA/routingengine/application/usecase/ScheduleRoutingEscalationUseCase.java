@@ -1,5 +1,8 @@
 package FST.MST_RSI.PFA.routingengine.application.usecase;
 
+import FST.MST_RSI.PFA.audit.application.service.AuditRecorder;
+import FST.MST_RSI.PFA.audit.domain.model.AuditAction;
+import FST.MST_RSI.PFA.audit.domain.model.AuditRecord;
 import FST.MST_RSI.PFA.routingengine.domain.model.RoutingExecutionStatus;
 import FST.MST_RSI.PFA.routingengine.domain.model.RoutingPolicy;
 import FST.MST_RSI.PFA.routingengine.domain.model.RoutingStepDefinition;
@@ -10,6 +13,7 @@ import FST.MST_RSI.PFA.routingengine.infrastructure.persistence.RoutingExecution
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -18,15 +22,18 @@ public class ScheduleRoutingEscalationUseCase {
     private final RoutingExecutionRepository routingExecutionRepository;
     private final RoutingPolicyRepositoryPort routingPolicyRepositoryPort;
     private final RoutingEscalationEngine routingEscalationEngine;
+    private final AuditRecorder auditRecorder;
 
     public ScheduleRoutingEscalationUseCase(
             RoutingExecutionRepository routingExecutionRepository,
             RoutingPolicyRepositoryPort routingPolicyRepositoryPort,
-            RoutingEscalationEngine routingEscalationEngine
+            RoutingEscalationEngine routingEscalationEngine,
+            AuditRecorder auditRecorder
     ) {
         this.routingExecutionRepository = routingExecutionRepository;
         this.routingPolicyRepositoryPort = routingPolicyRepositoryPort;
         this.routingEscalationEngine = routingEscalationEngine;
+        this.auditRecorder = auditRecorder;
     }
 
     @Transactional
@@ -61,5 +68,20 @@ public class ScheduleRoutingEscalationUseCase {
         }
 
         routingEscalationEngine.scheduleNextStep(execution, currentStep);
+        auditRecorder.record(new AuditRecord(
+                AuditAction.ESCALATION_SCHEDULED,
+                execution.getAlertId(),
+                execution.getClassificationId(),
+                execution.getId(),
+                null,
+                null,
+                "RoutingExecution",
+                execution.getId(),
+                "Escalation planifiée après l'étape " + currentStepOrder
+                        + " (action=" + currentStep.actionType() + ", delay=" + currentStep.delayAfterSeconds() + "s)",
+                AuditRecorder.correlationId(execution.getAlertId()),
+                null,
+                List.of()
+        ));
     }
 }

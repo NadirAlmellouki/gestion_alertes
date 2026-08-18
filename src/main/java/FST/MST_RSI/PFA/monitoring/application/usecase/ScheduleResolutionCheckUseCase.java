@@ -1,6 +1,9 @@
 package FST.MST_RSI.PFA.monitoring.application.usecase;
 
 import FST.MST_RSI.PFA.alerting.domain.model.Alert;
+import FST.MST_RSI.PFA.audit.application.service.AuditRecorder;
+import FST.MST_RSI.PFA.audit.domain.model.AuditAction;
+import FST.MST_RSI.PFA.audit.domain.model.AuditRecord;
 import FST.MST_RSI.PFA.monitoring.domain.model.ResolutionCheckStatus;
 import FST.MST_RSI.PFA.monitoring.infrastructure.config.ResolutionCheckProperties;
 import FST.MST_RSI.PFA.monitoring.infrastructure.persistence.ResolutionCheckEntity;
@@ -11,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -20,13 +24,16 @@ public class ScheduleResolutionCheckUseCase {
 
     private final ResolutionCheckRepository resolutionCheckRepository;
     private final ResolutionCheckProperties properties;
+    private final AuditRecorder auditRecorder;
 
     public ScheduleResolutionCheckUseCase(
             ResolutionCheckRepository resolutionCheckRepository,
-            ResolutionCheckProperties properties
+            ResolutionCheckProperties properties,
+            AuditRecorder auditRecorder
     ) {
         this.resolutionCheckRepository = resolutionCheckRepository;
         this.properties = properties;
+        this.auditRecorder = auditRecorder;
     }
 
     @Transactional
@@ -54,6 +61,21 @@ public class ScheduleResolutionCheckUseCase {
                 now
         );
         resolutionCheckRepository.save(check);
+        auditRecorder.record(new AuditRecord(
+                AuditAction.RESOLUTION_CHECK_SCHEDULED,
+                alertId,
+                null,
+                null,
+                null,
+                null,
+                "ResolutionCheck",
+                check.getId(),
+                "Suivi Dynatrace planifié pour problemId=" + alert.getExternalProblemId()
+                        + ", premier contrôle à " + firstCheckAt,
+                AuditRecorder.correlationId(alertId),
+                null,
+                List.of()
+        ));
         log.info("Scheduled Dynatrace resolution check for alert {} (problemId={}, firstCheckAt={})",
                 alertId, alert.getExternalProblemId(), firstCheckAt);
     }

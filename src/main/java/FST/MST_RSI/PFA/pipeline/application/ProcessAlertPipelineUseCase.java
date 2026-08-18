@@ -3,6 +3,9 @@ package FST.MST_RSI.PFA.pipeline.application;
 import FST.MST_RSI.PFA.alerting.domain.model.Alert;
 import FST.MST_RSI.PFA.alerting.domain.model.AlertId;
 import FST.MST_RSI.PFA.alerting.domain.port.AlertRepositoryPort;
+import FST.MST_RSI.PFA.audit.application.service.AuditRecorder;
+import FST.MST_RSI.PFA.audit.domain.model.AuditAction;
+import FST.MST_RSI.PFA.audit.domain.model.AuditRecord;
 import FST.MST_RSI.PFA.classification.application.usecase.ClassifyAlertUseCase;
 import FST.MST_RSI.PFA.classification.domain.model.ClassificationResult;
 import FST.MST_RSI.PFA.classification.infrastructure.persistence.AlertLlmAnalysisEntity;
@@ -24,6 +27,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
+import java.util.UUID;
+
 @Service
 public class ProcessAlertPipelineUseCase {
 
@@ -38,6 +44,7 @@ public class ProcessAlertPipelineUseCase {
     private final RoutingEngine routingEngine;
     private final ExecuteNotificationWorkflowUseCase executeNotificationWorkflowUseCase;
     private final ScheduleRoutingEscalationUseCase scheduleRoutingEscalationUseCase;
+    private final AuditRecorder auditRecorder;
 
     public ProcessAlertPipelineUseCase(
             AlertRepositoryPort alertRepositoryPort,
@@ -48,7 +55,8 @@ public class ProcessAlertPipelineUseCase {
             PersonResolver personResolver,
             RoutingEngine routingEngine,
             ExecuteNotificationWorkflowUseCase executeNotificationWorkflowUseCase,
-            ScheduleRoutingEscalationUseCase scheduleRoutingEscalationUseCase
+            ScheduleRoutingEscalationUseCase scheduleRoutingEscalationUseCase,
+            AuditRecorder auditRecorder
     ) {
         this.alertRepositoryPort = alertRepositoryPort;
         this.classifyAlertUseCase = classifyAlertUseCase;
@@ -59,6 +67,7 @@ public class ProcessAlertPipelineUseCase {
         this.routingEngine = routingEngine;
         this.executeNotificationWorkflowUseCase = executeNotificationWorkflowUseCase;
         this.scheduleRoutingEscalationUseCase = scheduleRoutingEscalationUseCase;
+        this.auditRecorder = auditRecorder;
     }
 
     @Transactional
@@ -72,6 +81,7 @@ public class ProcessAlertPipelineUseCase {
 
         BusinessRuleContext ruleContext = businessRuleContextBuilder.build(alert, analysis);
         BusinessDecision businessDecision = businessRuleEngine.evaluate(ruleContext, analysis.getId());
+        auditRuleDecision(alert.getId().value(), analysis.getId(), businessDecision);
 
         PersonResolver.HierarchyIds hierarchy = resolveHierarchy(ruleContext);
         RoutingContext routingContext = new RoutingContext(
@@ -86,6 +96,7 @@ public class ProcessAlertPipelineUseCase {
                 businessDecision.forcedRole()
         );
         RoutingDecision routingDecision = routingEngine.buildRoutingDecision(routingContext);
+        auditRoutingDecision(alert.getId().value(), analysis.getId(), routingDecision);
 
         ExecuteNotificationWorkflowUseCase.NotificationWorkflowResult notificationResult =
                 executeNotificationWorkflowUseCase.execute(
@@ -103,7 +114,69 @@ public class ProcessAlertPipelineUseCase {
 
         scheduleEscalationIfNeeded(routingDecision, notificationResult);
 
+        auditRecorder.record(new AuditRecord(
+                AuditAction.PIPELINE_COMPLETED,
+                alert.getId().value(),
+                analysis.getId(),
+                routingDecision.routingExecutionId(),
+                notificationResult.notificationId(),
+                null,
+                "AlertPipeline",
+                alert.getId().value(),
+                "Pipeline terminé: rule=" + businessDecision.matchedRuleCode()
+                        + ", routingStatus=" + routingDecision.routingStatus()
+                        + ", notificationOutcome=" + notificationResult.outcome(),
+                AuditRecorder.correlationId(alert.getId().value()),
+                null,
+                List.of()
+        ));
+
         return new PipelineResult(alertId, classification, businessDecision, routingDecision, notificationResult);
+    }
+
+    private void auditRuleDecision(UUID alertId, UUID analysisId, BusinessDecision decision) {
+        auditRecorder.record(new AuditRecord(
+                AuditAction.RULE_EVALUATED,
+                alertId,
+                analysisId,
+                null,
+                null,
+                null,
+                "BusinessRule",
+                decision.matchedRuleId(),
+                "Règle appliquée: " + decision.matchedRuleCode()
+                        + ", origin=" + decision.matchedRuleOrigin()
+                        + ", routingTriggered=" + decision.routingTriggered()
+                        + ", humanValidation=" + decision.humanValidationRequired(),
+                AuditRecorder.correlationId(alertId),
+                null,
+                List.of(
+                        new AuditRecord.AuditDetail("forcedRole", null, decision.forcedRole()),
+                        new AuditRecord.AuditDetail("selectedSolution", null, decision.selectedSolutionName())
+                )
+        ));
+    }
+
+    private void auditRoutingDecision(UUID alertId, UUID analysisId, RoutingDecision decision) {
+        String person = decision.selectedPersonName() != null ? decision.selectedPersonName() : "none";
+        String channel = decision.currentStep() != null ? decision.currentStep().channel() : "none";
+        auditRecorder.record(new AuditRecord(
+                AuditAction.ROUTING_DECIDED,
+                alertId,
+                analysisId,
+                decision.routingExecutionId(),
+                null,
+                decision.selectedPersonId(),
+                "RoutingPolicy",
+                decision.policyId(),
+                "Routage: policy=" + decision.policyCode()
+                        + ", status=" + decision.routingStatus()
+                        + ", person=" + person
+                        + ", channel=" + channel,
+                AuditRecorder.correlationId(alertId),
+                null,
+                List.of()
+        ));
     }
 
     private void scheduleEscalationIfNeeded(

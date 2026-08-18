@@ -1,5 +1,8 @@
 package FST.MST_RSI.PFA.routingengine.application.usecase;
 
+import FST.MST_RSI.PFA.audit.application.service.AuditRecorder;
+import FST.MST_RSI.PFA.audit.domain.model.AuditAction;
+import FST.MST_RSI.PFA.audit.domain.model.AuditRecord;
 import FST.MST_RSI.PFA.notification.application.usecase.ExecuteNotificationWorkflowUseCase;
 import FST.MST_RSI.PFA.routingengine.application.service.RoutingEscalationContextLoader;
 import FST.MST_RSI.PFA.routingengine.domain.model.ResolvedPerson;
@@ -19,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -34,6 +38,7 @@ public class ProcessRoutingEscalationUseCase {
     private final ExecuteNotificationWorkflowUseCase executeNotificationWorkflowUseCase;
     private final ScheduleRoutingEscalationUseCase scheduleRoutingEscalationUseCase;
     private final RoutingEscalationProperties properties;
+    private final AuditRecorder auditRecorder;
 
     public ProcessRoutingEscalationUseCase(
             RoutingExecutionRepository routingExecutionRepository,
@@ -42,7 +47,8 @@ public class ProcessRoutingEscalationUseCase {
             RoutingEscalationContextLoader contextLoader,
             ExecuteNotificationWorkflowUseCase executeNotificationWorkflowUseCase,
             ScheduleRoutingEscalationUseCase scheduleRoutingEscalationUseCase,
-            RoutingEscalationProperties properties
+            RoutingEscalationProperties properties,
+            AuditRecorder auditRecorder
     ) {
         this.routingExecutionRepository = routingExecutionRepository;
         this.routingPolicyRepositoryPort = routingPolicyRepositoryPort;
@@ -51,6 +57,7 @@ public class ProcessRoutingEscalationUseCase {
         this.executeNotificationWorkflowUseCase = executeNotificationWorkflowUseCase;
         this.scheduleRoutingEscalationUseCase = scheduleRoutingEscalationUseCase;
         this.properties = properties;
+        this.auditRecorder = auditRecorder;
     }
 
     @Transactional
@@ -121,6 +128,23 @@ public class ProcessRoutingEscalationUseCase {
 
         log.info("Escalation step {} for execution {}: notification={}",
                 result.step().stepOrder(), routingExecutionId, notificationResult.outcome());
+
+        auditRecorder.record(new AuditRecord(
+                AuditAction.ESCALATION_PROCESSED,
+                execution.getAlertId(),
+                execution.getClassificationId(),
+                execution.getId(),
+                notificationResult.notificationId(),
+                selected.personId(),
+                "RoutingStep",
+                result.step().id(),
+                "Escalation étape " + result.step().stepOrder()
+                        + " (" + result.step().actionType() + ") vers " + selected.fullName()
+                        + ", notification=" + notificationResult.outcome(),
+                AuditRecorder.correlationId(execution.getAlertId()),
+                null,
+                List.of()
+        ));
 
         scheduleRoutingEscalationUseCase.execute(execution.getId(), result.step().stepOrder());
     }

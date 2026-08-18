@@ -10,6 +10,7 @@ import FST.MST_RSI.PFA.common.domain.vo.Confidence;
 import FST.MST_RSI.PFA.directory.infrastructure.persistence.PersonEntity;
 import FST.MST_RSI.PFA.directory.infrastructure.persistence.PersonRepository;
 import FST.MST_RSI.PFA.monitoring.application.usecase.ScheduleResolutionCheckUseCase;
+import FST.MST_RSI.PFA.audit.application.service.AuditRecorder;
 import FST.MST_RSI.PFA.notification.application.service.EmailMessageComposer;
 import FST.MST_RSI.PFA.notification.application.service.SmsKafkaPayloadBuilder;
 import FST.MST_RSI.PFA.notification.application.service.VoipMessageComposer;
@@ -80,6 +81,8 @@ class ExecuteNotificationWorkflowUseCaseTest {
     private VoiceCallPort voiceCallPort;
     @Mock
     private ObjectProvider<VoiceCallPort> voiceCallPortProvider;
+    @Mock
+    private AuditRecorder auditRecorder;
 
     private VoipNotificationProperties voipProperties;
     private ExecuteNotificationWorkflowUseCase useCase;
@@ -103,7 +106,8 @@ class ExecuteNotificationWorkflowUseCaseTest {
                 voipProperties,
                 voipMessageComposer,
                 textToSpeechPort,
-                voiceCallPortProvider
+                voiceCallPortProvider,
+                auditRecorder
         );
     }
 

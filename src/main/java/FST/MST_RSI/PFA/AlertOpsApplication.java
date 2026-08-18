@@ -13,7 +13,8 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
         "FST.MST_RSI.PFA.rulesengine.infrastructure.persistence",
         "FST.MST_RSI.PFA.routingengine.infrastructure.persistence",
         "FST.MST_RSI.PFA.notification.infrastructure.persistence",
-        "FST.MST_RSI.PFA.monitoring.infrastructure.persistence"
+        "FST.MST_RSI.PFA.monitoring.infrastructure.persistence",
+        "FST.MST_RSI.PFA.audit.infrastructure.persistence"
 })
 @EnableJpaRepositories(basePackages = {
         "FST.MST_RSI.PFA.alerting.infrastructure.persistence",
@@ -22,7 +23,8 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
         "FST.MST_RSI.PFA.rulesengine.infrastructure.persistence",
         "FST.MST_RSI.PFA.routingengine.infrastructure.persistence",
         "FST.MST_RSI.PFA.notification.infrastructure.persistence",
-        "FST.MST_RSI.PFA.monitoring.infrastructure.persistence"
+        "FST.MST_RSI.PFA.monitoring.infrastructure.persistence",
+        "FST.MST_RSI.PFA.audit.infrastructure.persistence"
 })
 public class AlertOpsApplication {
     public static void main(String[] args) {

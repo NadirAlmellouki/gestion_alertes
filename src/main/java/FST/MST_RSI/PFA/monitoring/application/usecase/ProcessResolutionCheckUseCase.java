@@ -2,6 +2,11 @@ package FST.MST_RSI.PFA.monitoring.application.usecase;
 
 import FST.MST_RSI.PFA.alerting.domain.model.AlertId;
 import FST.MST_RSI.PFA.alerting.domain.port.AlertRepositoryPort;
+import FST.MST_RSI.PFA.audit.application.service.AuditRecorder;
+import FST.MST_RSI.PFA.audit.domain.model.AuditAction;
+import FST.MST_RSI.PFA.audit.domain.model.AuditRecord;
+import FST.MST_RSI.PFA.audit.domain.model.SystemEventRecord;
+import FST.MST_RSI.PFA.audit.domain.model.SystemEventSeverity;
 import FST.MST_RSI.PFA.monitoring.domain.model.DynatraceProblemSnapshot;
 import FST.MST_RSI.PFA.monitoring.domain.model.ResolutionCheckStatus;
 import FST.MST_RSI.PFA.monitoring.domain.port.DynatraceProblemPort;
@@ -33,6 +38,7 @@ public class ProcessResolutionCheckUseCase {
     private final RoutingExecutionRepository routingExecutionRepository;
     private final RoutingEscalationEngine routingEscalationEngine;
     private final ResolutionCheckProperties properties;
+    private final AuditRecorder auditRecorder;
 
     public ProcessResolutionCheckUseCase(
             ResolutionCheckRepository resolutionCheckRepository,
@@ -40,7 +46,8 @@ public class ProcessResolutionCheckUseCase {
             AlertRepositoryPort alertRepositoryPort,
             RoutingExecutionRepository routingExecutionRepository,
             RoutingEscalationEngine routingEscalationEngine,
-            ResolutionCheckProperties properties
+            ResolutionCheckProperties properties,
+            AuditRecorder auditRecorder
     ) {
         this.resolutionCheckRepository = resolutionCheckRepository;
         this.dynatraceProblemPort = dynatraceProblemPort;
@@ -48,6 +55,7 @@ public class ProcessResolutionCheckUseCase {
         this.routingExecutionRepository = routingExecutionRepository;
         this.routingEscalationEngine = routingEscalationEngine;
         this.properties = properties;
+        this.auditRecorder = auditRecorder;
     }
 
     @Transactional
@@ -75,6 +83,15 @@ public class ProcessResolutionCheckUseCase {
         if (snapshot.isEmpty()) {
             scheduleNextAttempt(check, "Dynatrace API unavailable");
             resolutionCheckRepository.save(check);
+            auditRecorder.recordSystemEvent(new SystemEventRecord(
+                    check.getAlertId(),
+                    null,
+                    "monitoring",
+                    SystemEventSeverity.WARN,
+                    "DYNATRACE_API_UNAVAILABLE",
+                    "Dynatrace API indisponible pour problemId=" + check.getExternalProblemId(),
+                    AuditRecorder.correlationId(check.getAlertId())
+            ));
             return;
         }
 
@@ -125,6 +142,24 @@ public class ProcessResolutionCheckUseCase {
             check.setLastDynatraceState(dynatraceState);
         }
         resolutionCheckRepository.save(check);
+        if (ResolutionCheckStatus.RESOLVED.equals(status) || ResolutionCheckStatus.EXPIRED.equals(status)) {
+            auditRecorder.record(new AuditRecord(
+                    AuditAction.RESOLUTION_CHECK_COMPLETED,
+                    check.getAlertId(),
+                    null,
+                    null,
+                    null,
+                    null,
+                    "ResolutionCheck",
+                    check.getId(),
+                    "Suivi Dynatrace terminé: status=" + status
+                            + ", dynatraceState=" + dynatraceState
+                            + ", attempts=" + check.getAttemptCount(),
+                    AuditRecorder.correlationId(check.getAlertId()),
+                    null,
+                    List.of()
+            ));
+        }
     }
 
     private boolean isExpired(ResolutionCheckEntity check) {

@@ -1,5 +1,8 @@
 package FST.MST_RSI.PFA.notification.application.usecase;
 
+import FST.MST_RSI.PFA.audit.application.service.AuditRecorder;
+import FST.MST_RSI.PFA.audit.domain.model.AuditAction;
+import FST.MST_RSI.PFA.audit.domain.model.AuditRecord;
 import FST.MST_RSI.PFA.alerting.domain.model.Alert;
 import FST.MST_RSI.PFA.alerting.domain.port.AlertRepositoryPort;
 import FST.MST_RSI.PFA.classification.domain.model.ClassificationResult;
@@ -34,6 +37,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -59,6 +63,7 @@ public class ExecuteNotificationWorkflowUseCase {
     private final VoipMessageComposer voipMessageComposer;
     private final TextToSpeechPort textToSpeechPort;
     private final ObjectProvider<VoiceCallPort> voiceCallPortProvider;
+    private final AuditRecorder auditRecorder;
 
     public ExecuteNotificationWorkflowUseCase(
             EmailNotificationPort emailNotificationPort,
@@ -73,7 +78,8 @@ public class ExecuteNotificationWorkflowUseCase {
             VoipNotificationProperties voipNotificationProperties,
             VoipMessageComposer voipMessageComposer,
             TextToSpeechPort textToSpeechPort,
-            ObjectProvider<VoiceCallPort> voiceCallPortProvider
+            ObjectProvider<VoiceCallPort> voiceCallPortProvider,
+            AuditRecorder auditRecorder
     ) {
         this.emailNotificationPort = emailNotificationPort;
         this.smsNotificationPort = smsNotificationPort;
@@ -88,6 +94,7 @@ public class ExecuteNotificationWorkflowUseCase {
         this.voipMessageComposer = voipMessageComposer;
         this.textToSpeechPort = textToSpeechPort;
         this.voiceCallPortProvider = voiceCallPortProvider;
+        this.auditRecorder = auditRecorder;
     }
 
     @Transactional
@@ -183,6 +190,7 @@ public class ExecuteNotificationWorkflowUseCase {
             alertRepositoryPort.save(alert);
             log.info("Email notification sent for alert {}", alert.getId().value());
             scheduleResolutionCheck(alert);
+            auditNotification(alert, routingDecision, notification.id(), "EMAIL", "EMAIL_SENT", NotificationStatus.SENT);
             return NotificationWorkflowResult.emailSent(notification.id());
         }
 
@@ -190,6 +198,7 @@ public class ExecuteNotificationWorkflowUseCase {
         alert.markNotificationFailed();
         alertRepositoryPort.save(alert);
         log.warn("Email notification failed for alert {}: {}", alert.getId().value(), deliveryResult.errorMessage());
+        auditNotification(alert, routingDecision, notification.id(), "EMAIL", "EMAIL_FAILED", NotificationStatus.FAILED);
         return NotificationWorkflowResult.emailFailed(notification.id(), deliveryResult.errorMessage());
     }
 
@@ -246,12 +255,14 @@ public class ExecuteNotificationWorkflowUseCase {
             alertRepositoryPort.save(alert);
             log.info("SMS Kafka notification published for alert {}", alert.getId().value());
             scheduleResolutionCheck(alert);
+            auditNotification(alert, routingDecision, notification.id(), "SMS", "SMS_SENT", NotificationStatus.SENT);
             return NotificationWorkflowResult.smsSent(notification.id());
         }
 
         notificationRepositoryPort.updateStatus(notification.id(), NotificationStatus.FAILED);
         alert.markNotificationFailed();
         alertRepositoryPort.save(alert);
+        auditNotification(alert, routingDecision, notification.id(), "SMS", "SMS_FAILED", NotificationStatus.FAILED);
         return NotificationWorkflowResult.smsFailed(notification.id(), deliveryResult.errorMessage());
     }
 
@@ -323,12 +334,14 @@ public class ExecuteNotificationWorkflowUseCase {
             alertRepositoryPort.save(alert);
             log.info("VoIP call initiated for alert {} to extension {}", alert.getId().value(), phone);
             scheduleResolutionCheck(alert);
+            auditNotification(alert, routingDecision, notification.id(), "VOIP", "VOIP_SENT", NotificationStatus.SENT);
             return NotificationWorkflowResult.voipSent(notification.id());
         }
 
         notificationRepositoryPort.updateStatus(notification.id(), NotificationStatus.FAILED);
         alert.markNotificationFailed();
         alertRepositoryPort.save(alert);
+        auditNotification(alert, routingDecision, notification.id(), "VOIP", "VOIP_FAILED", NotificationStatus.FAILED);
         return NotificationWorkflowResult.voipFailed(notification.id(), deliveryResult.errorMessage());
     }
 
@@ -354,7 +367,36 @@ public class ExecuteNotificationWorkflowUseCase {
         notificationRepositoryPort.updateStatus(notification.id(), NotificationStatus.DEFERRED);
         alertRepositoryPort.save(alert);
         scheduleResolutionCheck(alert);
+        auditNotification(alert, routingDecision, notification.id(), channel.name(), "DEFERRED_" + channel.name(), NotificationStatus.DEFERRED);
         return NotificationWorkflowResult.deferred(channel.name(), notification.id());
+    }
+
+    private void auditNotification(
+            Alert alert,
+            RoutingDecision routingDecision,
+            UUID notificationId,
+            String channel,
+            String outcome,
+            NotificationStatus status
+    ) {
+        auditRecorder.record(new AuditRecord(
+                AuditAction.NOTIFICATION_ATTEMPTED,
+                alert.getId().value(),
+                null,
+                routingDecision.routingExecutionId(),
+                notificationId,
+                routingDecision.selectedPersonId(),
+                "Notification",
+                notificationId,
+                "Notification " + channel + ": outcome=" + outcome + ", status=" + status
+                        + " (envoi technique, pas accusé de prise en charge)",
+                AuditRecorder.correlationId(alert.getId().value()),
+                null,
+                List.of(
+                        new AuditRecord.AuditDetail("channel", null, channel),
+                        new AuditRecord.AuditDetail("recipient", null, routingDecision.selectedPersonName())
+                )
+        ));
     }
 
     private void scheduleResolutionCheck(Alert alert) {
