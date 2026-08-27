@@ -117,6 +117,14 @@ public class NotificationEntity {
         this.callMode = callMode;
     }
 
+    public UUID getTriggeredByPersonId() {
+        return triggeredByPersonId;
+    }
+
+    public void setTriggeredByPersonId(UUID triggeredByPersonId) {
+        this.triggeredByPersonId = triggeredByPersonId;
+    }
+
     public int getPriority() {
         return priority;
     }

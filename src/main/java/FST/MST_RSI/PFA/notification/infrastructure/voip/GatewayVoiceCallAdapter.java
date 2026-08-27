@@ -39,7 +39,7 @@ public class GatewayVoiceCallAdapter implements VoiceCallPort {
         }
 
         Map<String, Object> payload = new HashMap<>();
-        payload.put("alertId", request.alertId().toString());
+        payload.put("alertId", request.alertId() != null ? request.alertId().toString() : null);
         payload.put("routingExecutionId", request.routingExecutionId() != null ? request.routingExecutionId().toString() : null);
         payload.put("personId", request.personId() != null ? request.personId().toString() : null);
         payload.put("phoneNumber", request.phoneNumber());
@@ -47,10 +47,15 @@ public class GatewayVoiceCallAdapter implements VoiceCallPort {
         payload.put("message", request.message());
         payload.put("correlationId", request.correlationId());
 
-        textToSpeechPort.synthesize(request.message()).ifPresent(audio -> {
-            payload.put("audioContentType", audio.contentType());
-            payload.put("audioBase64", java.util.Base64.getEncoder().encodeToString(audio.content()));
-        });
+        payload.put("liveConversation", request.liveConversation());
+        payload.put("callMode", request.liveConversation() ? "MANUAL" : "AUTO");
+
+        if (!request.liveConversation()) {
+            textToSpeechPort.synthesize(request.message()).ifPresent(audio -> {
+                payload.put("audioContentType", audio.contentType());
+                payload.put("audioBase64", java.util.Base64.getEncoder().encodeToString(audio.content()));
+            });
+        }
 
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(10_000);

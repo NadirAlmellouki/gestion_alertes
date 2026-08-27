@@ -54,7 +54,7 @@ class ClassifyAlertUseCaseTest {
                 null
         ));
 
-        ClassificationResult result = classifyAlertUseCase.execute(alertId);
+        ClassificationResult result = classifyAlertUseCase.execute(alertId).result();
 
         assertThat(result.status()).isEqualTo(ClassificationStatus.SUCCESS);
         assertThat(result.matchedSolution()).isEqualTo("PayCore");
@@ -70,7 +70,7 @@ class ClassifyAlertUseCaseTest {
         when(alertClassifierPort.classify(any(), anyList()))
                 .thenReturn(ClassificationResult.fallback("LLM provider returned HTTP 503"));
 
-        ClassificationResult result = classifyAlertUseCase.execute(alertId);
+        ClassificationResult result = classifyAlertUseCase.execute(alertId).result();
 
         assertThat(result.status()).isEqualTo(ClassificationStatus.FALLBACK);
         assertThat(result.requiresHumanValidation()).isTrue();

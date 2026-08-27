@@ -10,12 +10,35 @@ import java.util.UUID;
 
 public interface NotificationRepositoryPort {
 
-    NotificationRecord createPending(
+    default NotificationRecord createPending(
             UUID alertId,
             UUID routingExecutionId,
             NotificationType type,
             UUID recipientPersonId,
             String destination
+    ) {
+        return createPending(alertId, routingExecutionId, type, recipientPersonId, destination, "AUTO");
+    }
+
+    default NotificationRecord createPending(
+            UUID alertId,
+            UUID routingExecutionId,
+            NotificationType type,
+            UUID recipientPersonId,
+            String destination,
+            String callMode
+    ) {
+        return createPending(alertId, routingExecutionId, type, recipientPersonId, destination, callMode, null);
+    }
+
+    NotificationRecord createPending(
+            UUID alertId,
+            UUID routingExecutionId,
+            NotificationType type,
+            UUID recipientPersonId,
+            String destination,
+            String callMode,
+            UUID triggeredByPersonId
     );
 
     void recordAttempt(

@@ -13,6 +13,9 @@ public class FakeTtsAdapter implements TextToSpeechPort {
 
     @Override
     public Optional<TtsAudio> synthesize(String text) {
-        return Optional.empty();
+        if (text == null || text.isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.of(PcmWavTone.shortAlertTone());
     }
 }

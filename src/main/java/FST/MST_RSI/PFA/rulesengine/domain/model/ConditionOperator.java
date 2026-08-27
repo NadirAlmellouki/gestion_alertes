@@ -35,7 +35,13 @@ public enum ConditionOperator {
             case "NOT IN", "NOT_IN" -> NOT_IN;
             case "IS_NULL" -> IS_NULL;
             case "IS_NOT_NULL" -> IS_NOT_NULL;
-            default -> ConditionOperator.valueOf(value);
+            default -> {
+                try {
+                    yield ConditionOperator.valueOf(value);
+                } catch (IllegalArgumentException ex) {
+                    yield EQUALS;
+                }
+            }
         };
     }
 

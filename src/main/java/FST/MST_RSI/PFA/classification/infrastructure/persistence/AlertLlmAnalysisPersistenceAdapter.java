@@ -23,14 +23,14 @@ public class AlertLlmAnalysisPersistenceAdapter {
         this.objectMapper = objectMapper;
     }
 
-    public void save(
+    public AlertLlmAnalysisEntity save(
             UUID alertId,
             ClassificationResult result,
             String provider,
             String promptVersion,
             long durationMs
     ) {
-        repository.save(AlertLlmAnalysisEntity.create(
+        return repository.save(AlertLlmAnalysisEntity.create(
                 UUID.randomUUID(),
                 alertId,
                 provider,

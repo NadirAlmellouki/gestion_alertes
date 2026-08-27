@@ -1,4 +1,6 @@
--- Audit trail and system events for workflow traceability (banking compliance).
+-- Audit trail and system events.
+-- Tables may already exist from the V0 schema (audit_log, audit_log_detail, system_event).
+-- This migration creates them if missing, then aligns columns used by the audit module.
 
 CREATE TABLE IF NOT EXISTS audit_log (
     id                     UUID PRIMARY KEY,
@@ -15,6 +17,23 @@ CREATE TABLE IF NOT EXISTS audit_log (
     ip_address             VARCHAR(100),
     created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE audit_log
+    ADD COLUMN IF NOT EXISTS correlation_id VARCHAR(100);
+
+ALTER TABLE audit_log
+    ADD COLUMN IF NOT EXISTS llm_analysis_id UUID;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'audit_log_llm_analysis_id_fkey'
+    ) THEN
+        ALTER TABLE audit_log
+            ADD CONSTRAINT audit_log_llm_analysis_id_fkey
+            FOREIGN KEY (llm_analysis_id) REFERENCES alert_llm_analysis (id) ON DELETE SET NULL;
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS ix_audit_log_alert_id ON audit_log (alert_id);
 CREATE INDEX IF NOT EXISTS ix_audit_log_action ON audit_log (action);
@@ -40,9 +59,33 @@ CREATE TABLE IF NOT EXISTS system_event (
     event_type       VARCHAR(100) NOT NULL,
     message          TEXT,
     correlation_id   VARCHAR(100),
-    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT chk_system_event_severity CHECK (severity IN ('DEBUG', 'INFO', 'WARN', 'ERROR'))
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE system_event
+    ADD COLUMN IF NOT EXISTS correlation_id VARCHAR(100);
+
+ALTER TABLE system_event
+    ADD COLUMN IF NOT EXISTS llm_analysis_id UUID;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'system_event_llm_analysis_id_fkey'
+    ) THEN
+        ALTER TABLE system_event
+            ADD CONSTRAINT system_event_llm_analysis_id_fkey
+            FOREIGN KEY (llm_analysis_id) REFERENCES alert_llm_analysis (id) ON DELETE SET NULL;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'chk_system_event_severity'
+    ) THEN
+        ALTER TABLE system_event
+            ADD CONSTRAINT chk_system_event_severity
+            CHECK (severity IS NULL OR severity IN ('DEBUG', 'INFO', 'WARN', 'ERROR'));
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS ix_system_event_alert_id ON system_event (alert_id);
 CREATE INDEX IF NOT EXISTS ix_system_event_created_at ON system_event (created_at DESC);

@@ -46,7 +46,7 @@ spring:
     type: caffeine
 
 server:
-  port: 8080
+  port: ${SERVER_PORT:8085}
 
 management:
   endpoints:
@@ -72,16 +72,16 @@ app:
   llm:
     provider: gemini
     gemini:
-      api-key: ${GEMINI_API_KEY:}
-      model: ${GEMINI_MODEL:gemini-2.0-flash}
+      api-key: ${GEMINI_API_KEY}
+      model: ${GEMINI_MODEL:gemini-3.6-flash}
       base-url: ${GEMINI_BASE_URL:https://generativelanguage.googleapis.com}
       timeout-seconds: 30
   voice:
     tts:
-      provider: fake
+      provider: ${TTS_PROVIDER:elevenlabs}
       elevenlabs:
-        api-key: ${ELEVENLABS_API_KEY:}
-        voice-id: ${ELEVENLABS_VOICE_ID:21m00Tcm4TlvDq8ikWAM}
+        api-key: ${ELEVENLABS_API_KEY}
+        voice-id: ${ELEVENLABS_VOICE_ID}
         model-id: eleven_multilingual_v2
         base-url: https://api.elevenlabs.io
         timeout-seconds: 30
@@ -107,9 +107,18 @@ app:
       kafka:
         topic: ${ALERTOPS_SMS_TOPIC:alertops-sms-notifications}
     voip:
-      enabled: false
-      provider: local
+      enabled: ${VOIP_ENABLED:true}
+      provider: ${VOIP_PROVIDER:asterisk}
       gateway-url: ${VOIP_GATEWAY_URL:http://localhost:8088/api/v1/calls}
+      ari-url: ${VOIP_ARI_URL:http://localhost:8088}
+      ari-user: ${VOIP_ARI_USER:alertops}
+      ari-password: ${VOIP_ARI_PASSWORD:alertops}
+      ws-url: ${VOIP_WS_URL:ws://localhost:8088/ws}
+      audio-dir: ${VOIP_AUDIO_DIR:docker/asterisk/sounds}
+      sip-domain: ${VOIP_SIP_DOMAIN:localhost}
+      sip-password: ${VOIP_SIP_PASSWORD:alertops}
+      timeout-seconds: 30
+      max-attempts: 3
   routing:
     escalation:
       enabled: true

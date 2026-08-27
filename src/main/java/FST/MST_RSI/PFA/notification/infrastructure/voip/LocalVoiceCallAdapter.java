@@ -27,17 +27,19 @@ public class LocalVoiceCallAdapter implements VoiceCallPort {
 
     @Override
     public NotificationDeliveryResult call(VoiceCallRequest request) {
-        Optional<TtsAudio> audio = textToSpeechPort.synthesize(request.message());
+        Optional<TtsAudio> audio = request.liveConversation()
+                ? Optional.empty()
+                : textToSpeechPort.synthesize(request.message());
         String callId = UUID.randomUUID().toString();
 
         log.info(
-                "VOIP local call initiated callId={} alertId={} extension={} recipient={} ttsBytes={} message={}",
+                "VOIP local {} call initiated callId={} alertId={} extension={} recipient={} ttsBytes={}",
+                request.liveConversation() ? "manual" : "auto",
                 callId,
                 request.alertId(),
                 request.phoneNumber(),
                 request.recipientName(),
-                audio.map(a -> a.content().length).orElse(0),
-                request.message()
+                audio.map(a -> a.content().length).orElse(0)
         );
 
         return NotificationDeliveryResult.sent(callId);

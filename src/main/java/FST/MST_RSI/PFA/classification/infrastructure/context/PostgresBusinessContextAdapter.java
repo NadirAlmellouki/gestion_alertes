@@ -18,7 +18,7 @@ import java.util.Optional;
 public class PostgresBusinessContextAdapter implements BusinessContextPort {
 
     private static final int MAX_CANDIDATES = 8;
-    private static final int SQL_PREFETCH_LIMIT = 40;
+    private static final int SQL_PREFETCH_LIMIT = 250;
 
     @PersistenceContext
     private EntityManager entityManager;

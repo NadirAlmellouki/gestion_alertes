@@ -11,6 +11,20 @@ public record VoiceCallRequest(
         String message,
         byte[] audioContent,
         String audioContentType,
-        String correlationId
+        String correlationId,
+        boolean liveConversation
 ) {
+    public VoiceCallRequest(
+            UUID alertId,
+            UUID routingExecutionId,
+            UUID personId,
+            String phoneNumber,
+            String recipientName,
+            String message,
+            byte[] audioContent,
+            String audioContentType,
+            String correlationId
+    ) {
+        this(alertId, routingExecutionId, personId, phoneNumber, recipientName, message, audioContent, audioContentType, correlationId, false);
+    }
 }

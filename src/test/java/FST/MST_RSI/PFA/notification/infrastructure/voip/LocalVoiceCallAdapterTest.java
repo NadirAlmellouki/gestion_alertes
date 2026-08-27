@@ -40,4 +40,25 @@ class LocalVoiceCallAdapterTest {
         assertThat(result.success()).isTrue();
         assertThat(result.providerMessageId()).isNotBlank();
     }
+
+    @Test
+    void skipsTtsForManualLiveConversation() {
+        LocalVoiceCallAdapter adapter = new LocalVoiceCallAdapter(textToSpeechPort);
+
+        var result = adapter.call(new VoiceCallRequest(
+                UUID.randomUUID(),
+                null,
+                UUID.randomUUID(),
+                "1001",
+                "Jane Doe",
+                "LIVE_CONVERSATION",
+                null,
+                null,
+                "corr-manual",
+                true
+        ));
+
+        assertThat(result.success()).isTrue();
+        org.mockito.Mockito.verifyNoInteractions(textToSpeechPort);
+    }
 }

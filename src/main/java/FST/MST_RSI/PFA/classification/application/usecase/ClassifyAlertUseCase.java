@@ -12,6 +12,7 @@ import FST.MST_RSI.PFA.classification.domain.model.SolutionContext;
 import FST.MST_RSI.PFA.classification.domain.port.AlertClassifierPort;
 import FST.MST_RSI.PFA.classification.domain.port.BusinessContextPort;
 import FST.MST_RSI.PFA.classification.domain.service.ClassificationPromptBuilder;
+import FST.MST_RSI.PFA.classification.infrastructure.persistence.AlertLlmAnalysisEntity;
 import FST.MST_RSI.PFA.classification.infrastructure.persistence.AlertLlmAnalysisPersistenceAdapter;
 import FST.MST_RSI.PFA.common.exception.ResourceNotFoundException;
 import org.slf4j.Logger;
@@ -57,8 +58,14 @@ public class ClassifyAlertUseCase {
         this.provider = provider;
     }
 
+    /** Wraps the classification result together with the persisted analysis entity. */
+    public record ClassificationBundle(
+            ClassificationResult result,
+            AlertLlmAnalysisEntity analysis
+    ) {}
+
     @Transactional
-    public ClassificationResult execute(String alertId) {
+    public ClassificationBundle execute(String alertId) {
         Alert alert = alertRepositoryPort.findById(AlertId.of(alertId))
                 .orElseThrow(() -> new ResourceNotFoundException("Alert not found: " + alertId));
 
@@ -80,7 +87,7 @@ public class ClassifyAlertUseCase {
                 ? ClassificationPromptBuilder.PROMPT_VERSION
                 : promptVersion;
 
-        llmAnalysisPersistenceAdapter.save(
+        AlertLlmAnalysisEntity savedAnalysis = llmAnalysisPersistenceAdapter.save(
                 alert.getId().value(),
                 result,
                 provider,
@@ -104,7 +111,7 @@ public class ClassifyAlertUseCase {
                 alertId, result.status(), result.category(), result.confidence().value(),
                 result.resolvedPsi(), duration);
 
-        return result;
+        return new ClassificationBundle(result, savedAnalysis);
     }
 
     private ClassificationResult enrichWithOfficialPsi(ClassificationResult result) {

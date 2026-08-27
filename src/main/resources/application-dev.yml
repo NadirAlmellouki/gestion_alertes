@@ -29,3 +29,10 @@ app:
     import-on-startup: false
   classification:
     prompt-version: v2
+  notification:
+    voip:
+      enabled: ${VOIP_ENABLED:true}
+      provider: asterisk
+  voice:
+    tts:
+      provider: ${TTS_PROVIDER:elevenlabs}

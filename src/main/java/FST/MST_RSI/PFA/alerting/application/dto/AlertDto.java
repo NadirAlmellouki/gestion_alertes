@@ -17,6 +17,19 @@ public record AlertDto(
         String problemUrl,
         String hostName,
         Instant receivedAt,
-        Instant problemStartedAt
+        Instant problemStartedAt,
+        String classificationStatus,
+        String classificationCategory,
+        String problemType,
+        Double confidence,
+        Boolean requiresHumanValidation,
+        String matchedSolution,
+        String matchedDomain,
+        String matchedPole,
+        String matchedEntity,
+        String resolvedPsi,
+        String summary,
+        String probableCause,
+        String justification
 ) {
 }

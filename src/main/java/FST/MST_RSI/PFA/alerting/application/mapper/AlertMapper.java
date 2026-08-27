@@ -3,6 +3,7 @@ package FST.MST_RSI.PFA.alerting.application.mapper;
 import FST.MST_RSI.PFA.alerting.application.dto.AlertDto;
 import FST.MST_RSI.PFA.alerting.application.dto.AlertSummaryDto;
 import FST.MST_RSI.PFA.alerting.domain.model.Alert;
+import FST.MST_RSI.PFA.classification.infrastructure.persistence.AlertLlmAnalysisEntity;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -28,6 +29,10 @@ public class AlertMapper {
     }
 
     public AlertDto toDetail(Alert alert) {
+        return toDetail(alert, null);
+    }
+
+    public AlertDto toDetail(Alert alert, AlertLlmAnalysisEntity analysis) {
         return new AlertDto(
                 alert.getId().value().toString(),
                 alert.getExternalProblemId(),
@@ -41,7 +46,20 @@ public class AlertMapper {
                 alert.getProblemUrl(),
                 alert.getHostName(),
                 alert.getReceivedAt(),
-                alert.getProblemStartedAt()
+                alert.getProblemStartedAt(),
+                analysis == null || analysis.getStatus() == null ? null : analysis.getStatus().name(),
+                analysis == null || analysis.getCategory() == null ? null : analysis.getCategory().name(),
+                analysis == null ? null : analysis.getProblemType(),
+                analysis == null || analysis.getConfidence() == null ? null : analysis.getConfidence().doubleValue(),
+                analysis == null ? null : analysis.isRequiresHumanValidation(),
+                analysis == null ? null : analysis.getMatchedSolution(),
+                analysis == null ? null : analysis.getMatchedDomain(),
+                analysis == null ? null : analysis.getMatchedPole(),
+                analysis == null ? null : analysis.getMatchedEntity(),
+                analysis == null ? null : analysis.getResolvedPsi(),
+                analysis == null ? null : analysis.getSummary(),
+                analysis == null ? null : analysis.getProbableCause(),
+                analysis == null ? null : analysis.getJustification()
         );
     }
 }

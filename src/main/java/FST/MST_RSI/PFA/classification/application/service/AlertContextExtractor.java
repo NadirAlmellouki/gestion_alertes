@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -53,6 +54,19 @@ public class AlertContextExtractor {
         add(terms, context.rootCauseEntity());
         context.affectedEntityNames().forEach(n -> add(terms, n));
         context.impactedEntityNames().forEach(n -> add(terms, n));
+        List<String> stopWords = List.of("service", "services", "production", "prod", "indisponibilite", "erreur", "error", "serveur", "server", "authentification", "unavailable", "failure", "alert", "problem", "incident");
+        if (alert.getTitle() != null) {
+            for (String word : alert.getTitle().split("[\\s,;:\\-_/()'\"]+")) {
+                if (word.length() >= 3 && !stopWords.contains(word.toLowerCase(Locale.ROOT))) {
+                    add(terms, word);
+                }
+            }
+        }
+        if (context.entityTags() != null) {
+            for (Map<String, String> tag : context.entityTags()) {
+                add(terms, tag.get("value"));
+            }
+        }
         return terms.toArray(String[]::new);
     }
 

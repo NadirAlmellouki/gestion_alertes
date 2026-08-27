@@ -9,7 +9,6 @@ import FST.MST_RSI.PFA.audit.domain.model.AuditRecord;
 import FST.MST_RSI.PFA.classification.application.usecase.ClassifyAlertUseCase;
 import FST.MST_RSI.PFA.classification.domain.model.ClassificationResult;
 import FST.MST_RSI.PFA.classification.infrastructure.persistence.AlertLlmAnalysisEntity;
-import FST.MST_RSI.PFA.classification.infrastructure.persistence.AlertLlmAnalysisRepository;
 import FST.MST_RSI.PFA.common.exception.ResourceNotFoundException;
 import FST.MST_RSI.PFA.notification.application.usecase.ExecuteNotificationWorkflowUseCase;
 import FST.MST_RSI.PFA.notification.domain.model.NotificationStatus;
@@ -37,7 +36,6 @@ public class ProcessAlertPipelineUseCase {
 
     private final AlertRepositoryPort alertRepositoryPort;
     private final ClassifyAlertUseCase classifyAlertUseCase;
-    private final AlertLlmAnalysisRepository llmAnalysisRepository;
     private final BusinessRuleContextBuilder businessRuleContextBuilder;
     private final BusinessRuleEngine businessRuleEngine;
     private final PersonResolver personResolver;
@@ -49,7 +47,6 @@ public class ProcessAlertPipelineUseCase {
     public ProcessAlertPipelineUseCase(
             AlertRepositoryPort alertRepositoryPort,
             ClassifyAlertUseCase classifyAlertUseCase,
-            AlertLlmAnalysisRepository llmAnalysisRepository,
             BusinessRuleContextBuilder businessRuleContextBuilder,
             BusinessRuleEngine businessRuleEngine,
             PersonResolver personResolver,
@@ -60,7 +57,6 @@ public class ProcessAlertPipelineUseCase {
     ) {
         this.alertRepositoryPort = alertRepositoryPort;
         this.classifyAlertUseCase = classifyAlertUseCase;
-        this.llmAnalysisRepository = llmAnalysisRepository;
         this.businessRuleContextBuilder = businessRuleContextBuilder;
         this.businessRuleEngine = businessRuleEngine;
         this.personResolver = personResolver;
@@ -75,9 +71,9 @@ public class ProcessAlertPipelineUseCase {
         Alert alert = alertRepositoryPort.findById(AlertId.of(alertId))
                 .orElseThrow(() -> new ResourceNotFoundException("Alert not found: " + alertId));
 
-        ClassificationResult classification = classifyAlertUseCase.execute(alertId);
-        AlertLlmAnalysisEntity analysis = llmAnalysisRepository.findTopByAlertIdOrderByCreatedAtDesc(alert.getId().value())
-                .orElseThrow(() -> new IllegalStateException("LLM analysis missing for alert " + alertId));
+        ClassifyAlertUseCase.ClassificationBundle bundle = classifyAlertUseCase.execute(alertId);
+        ClassificationResult classification = bundle.result();
+        AlertLlmAnalysisEntity analysis = bundle.analysis();
 
         BusinessRuleContext ruleContext = businessRuleContextBuilder.build(alert, analysis);
         BusinessDecision businessDecision = businessRuleEngine.evaluate(ruleContext, analysis.getId());
@@ -114,7 +110,9 @@ public class ProcessAlertPipelineUseCase {
 
         scheduleEscalationIfNeeded(routingDecision, notificationResult);
 
-        auditRecorder.record(new AuditRecord(
+        // Use executeAfterCommit so the PIPELINE_COMPLETED audit is written after the
+        // parent @Transactional commits — this guarantees notificationId FK is resolvable.
+        auditRecorder.recordAfterCommit(new AuditRecord(
                 AuditAction.PIPELINE_COMPLETED,
                 alert.getId().value(),
                 analysis.getId(),

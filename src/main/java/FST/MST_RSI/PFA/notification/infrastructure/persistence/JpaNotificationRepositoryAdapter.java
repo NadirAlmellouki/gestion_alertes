@@ -28,7 +28,9 @@ public class JpaNotificationRepositoryAdapter implements NotificationRepositoryP
             UUID routingExecutionId,
             NotificationType type,
             UUID recipientPersonId,
-            String destination
+            String destination,
+            String callMode,
+            UUID triggeredByPersonId
     ) {
         UUID notificationId = UUID.randomUUID();
         NotificationEntity notification = new NotificationEntity();
@@ -37,6 +39,8 @@ public class JpaNotificationRepositoryAdapter implements NotificationRepositoryP
         notification.setRoutingExecutionId(routingExecutionId);
         notification.setNotificationType(type);
         notification.setNotificationStatus(NotificationStatus.PENDING);
+        notification.setCallMode(callMode == null || callMode.isBlank() ? "AUTO" : callMode);
+        notification.setTriggeredByPersonId(triggeredByPersonId);
         notification.setPriority(0);
         notification.setCreatedAt(Instant.now());
 

@@ -1,1796 +1,1586 @@
-# PROMPT CURSOR — IMPLÉMENTATION COMPLÈTE DES RÈGLES MÉTIER ET DU ROUTAGE
-
-Tu dois maintenant implémenter la partie centrale de l'application : **le système de règles métier et de routage**, avec à la fois :
-
-1. les **règles métier par défaut** ;
-2. les **règles de routage par défaut** ;
-3. les **règles métier configurables par les Ops** ;
-4. les **règles de routage configurables par les Ops** ;
-5. l'exécution réelle de ces règles côté Java/Spring Boot ;
-6. la persistance de leur configuration dans PostgreSQL ;
-7. l'intégration avec le résultat de classification du LLM ;
-8. l'intégration avec la hiérarchie organisationnelle et les personnes ;
-9. l'intégration avec la notification et les étapes de routage ;
-10. la traçabilité des décisions et des exécutions.
-
-## 1. CONTEXTE FONCTIONNEL IMPORTANT
-
-Le système reçoit une alerte Dynatrace.
-
-Le LLM intervient principalement pour **analyser/classifier l'alerte** et proposer, parmi les candidats récupérés depuis PostgreSQL :
-
-* une catégorie ;
-* un type de problème ;
-* une confidence ;
-* une Solution candidate ;
-* éventuellement un Domaine ;
-* éventuellement un Pôle ;
-* éventuellement une Entité ;
-* un résumé ;
-* une cause probable ;
-* une justification ;
-* les champs incertains ;
-* un indicateur de fallback ;
-* un indicateur de validation humaine.
-
-Le LLM **ne doit pas décider** :
-
-* de la priorité métier officielle ;
-* du PSI ;
-* des personnes à contacter ;
-* de l'ordre des personnes ;
-* du canal de communication ;
-* de l'escalade ;
-* du nombre de relances ;
-* de la durée des relances ;
-* de l'action finale à exécuter.
-
-Le LLM fournit donc **des informations d'entrée pour la logique déterministe de l'application**.
-
-Le reste doit être décidé par le système de règles.
-
----
-
-# 2. DISTINCTION FONDAMENTALE À RESPECTER
-
-Il existe deux domaines différents :
-
-## A. BUSINESS RULE ENGINE
-
-Il répond à :
-
-> **« Que devons-nous décider concernant cette alerte ? »**
-
-Exemples :
-
-* quelle Solution utiliser ;
-* quel contexte métier est retenu ;
-* quelle politique métier appliquer ;
-* faut-il demander une validation humaine ;
-* quelle décision métier prendre à partir du résultat LLM + BDD ;
-* quelles conditions métier sont satisfaites ;
-* quelle action métier doit être produite.
-
-Il ne doit pas devenir un moteur de routage déguisé.
-
----
-
-## B. ROUTING ENGINE
-
-Il répond à :
-
-> **« Maintenant que nous savons quoi faire, vers qui et comment devons-nous agir ? »**
-
-Exemples :
-
-* trouver les personnes correspondant à un rôle métier ;
-* résoudre un rôle au niveau Solution/Domaine/Pôle/Entité ;
-* déterminer l'ordre des personnes ;
-* appeler la première personne ;
-* attendre le délai configuré ;
-* passer à la personne suivante ;
-* notifier un superviseur ;
-* changer de canal ;
-* gérer les réponses ACCEPTED / REJECTED / TIMEOUT ;
-* terminer ou poursuivre le routage.
-
-**Ne mélange jamais ces deux responsabilités.**
-
----
-
-# 3. RÈGLES PAR DÉFAUT VS RÈGLES CONFIGURABLES
-
-C'est un point essentiel.
-
-Les règles par défaut ne sont PAS une « ancienne version » du moteur.
-
-Elles font partie du **flux normal V0**.
-
-Le comportement normal de l'application doit être défini par ces règles par défaut.
-
-Les règles configurées par les Ops constituent des **branches configurables pouvant modifier ou remplacer le comportement par défaut lorsqu'une condition est satisfaite**.
-
-Conceptuellement :
-
-```text
-ALERTE
-  |
-  v
-Classification LLM
-  |
-  v
-Contexte métier
-  |
-  v
-BUSINESS RULE ENGINE
-  |
-  +---- règle configurable correspondante
-  |          |
-  |          v
-  |     décision configurée
-  |
-  +---- aucune règle configurable
-             |
-             v
-       décision par défaut
-  |
-  v
-ROUTING ENGINE
-  |
-  +---- politique configurable correspondante
-  |          |
-  |          v
-  |     routage configuré
-  |
-  +---- aucune politique correspondante
-             |
-             v
-       routage par défaut
-  |
-  v
-NOTIFICATION / ACTION
-```
-
-Il ne faut donc **jamais coder les règles par défaut uniquement dans des `if/else` Java impossibles à modifier**.
-
-Le système doit permettre de représenter leur configuration et leur comportement de manière suffisamment structurée.
-
----
-
-# 4. OBJECTIF PRINCIPAL
-
-Implémente un véritable système où :
-
-```text
-LLM result
-     +
-Alert data
-     +
-Organization data
-     +
-Solution data
-     +
-Person / role data
-     +
-Availability
-     +
-Default rules
-     +
-Configurable rules
-     ↓
-Deterministic decision
-     ↓
-Routing decision
-     ↓
-Action execution
-```
-
-Les données doivent réellement circuler entre les composants.
-
-Ne réalise pas uniquement le CRUD du frontend.
-
-Je veux que la configuration créée dans l'interface Ops soit réellement :
-
-1. enregistrée dans PostgreSQL ;
-2. chargée par Spring Boot ;
-3. transformée en objets métier ;
-4. évaluée par le moteur ;
-5. utilisée pour prendre une décision ;
-6. persistée dans les tables d'exécution ;
-7. visible dans l'historique/audit.
-
----
-
-# 5. UTILISER LE PROTOTYPE EXISTANT
-
-Avant toute modification frontend :
-
-Lis impérativement :
-
-```text
-/info/prototype.jsx
-```
-
-Le prototype constitue la référence UX/UI actuelle.
-
-Tu dois conserver :
-
-* sa structure générale ;
-* son style ;
-* ses conventions visuelles ;
-* ses écrans existants ;
-* ses concepts métier.
-
-Ajoute les nouvelles fonctionnalités dans le même langage visuel.
-
-Ne crée pas une deuxième interface incohérente.
-
----
-
-# 6. PARTIE OPS — CONFIGURATION DES RÈGLES MÉTIER
-
-Ajouter une partie permettant aux Ops de gérer les règles métier.
-
-L'interface doit permettre au minimum :
-
-### Liste des règles
-
-Afficher :
-
-* code ;
-* nom ;
-* description ;
-* état activé/désactivé ;
-* priorité d'évaluation ;
-* type de règle ;
-* stop on match ;
-* date de création/modification si disponible ;
-* indication règle par défaut / règle configurable.
-
-Permettre :
-
-* recherche ;
-* filtrage ;
-* activation/désactivation ;
-* modification ;
-* duplication ;
-* suppression si autorisée ;
-* consultation détaillée.
-
----
-
-# 7. ÉDITEUR DE RÈGLE MÉTIER
-
-Créer un éditeur permettant de construire une règle sans écrire de code.
-
-Une règle doit pouvoir contenir :
-
-### Informations générales
-
-```text
-Code
-Nom
-Description
-Enabled
-Evaluation priority
-Stop on match
-```
-
-### Conditions
-
-Supporter des groupes de conditions.
-
-Exemple :
-
-```text
-GROUP 1
-    category = AVAILABILITY
-    AND confidence >= 0.80
-
-GROUP 2
-    matchedSolution = "Solution A"
-    OR problemType = "Database unavailable"
-```
-
-Le système doit respecter la structure :
-
-```text
-Rule
- ├── Condition Group
- │     ├── Condition
- │     ├── Condition
- │     └── ...
- │
- ├── Condition Group
- │     └── ...
- │
- ├── Exception Group
- │     ├── Condition
- │     └── ...
- │
- └── Actions
-```
-
-Les groupes doivent pouvoir utiliser `AND` / `OR`.
-
----
-
-# 8. CONDITIONS DISPONIBLES
-
-Ne limite pas artificiellement les conditions à quelques champs.
-
-Construis une abstraction permettant d'évaluer différents types de données.
-
-Les conditions doivent notamment pouvoir exploiter :
-
-### Alert
-
-* severity ;
-* status ;
-* impactLevel ;
-* source ;
-* title ;
-* problemId ;
-* linkedProblemId ;
-* start/end time ;
-* entity information ;
-* tags ;
-* etc.
-
-### LLM analysis
-
-* category ;
-* problemType ;
-* confidence ;
-* matchedSolution ;
-* matchedDomain ;
-* matchedPole ;
-* matchedEntity ;
-* probableCause ;
-* requiresHumanValidation ;
-* fallback ;
-* uncertainFields ;
-* status.
-
-### Business context
-
-* Solution ;
-* Domaine ;
-* Pôle ;
-* Entité ;
-* service type ;
-* solution type ;
-* PSI ;
-* target scope ;
-* etc.
-
-### Organisation
-
-* rôle métier ;
-* niveau organisationnel ;
-* personnes disponibles ;
-* primary contact ;
-* active/inactive.
-
-### Contexte temporel
-
-Prévoir la possibilité d'ajouter ultérieurement des conditions comme :
-
-* heure ;
-* jour ;
-* plage horaire ;
-* durée depuis réception ;
-* durée depuis dernière tentative ;
-* etc.
-
-Ne hardcode pas chaque condition directement dans le moteur.
-
-Crée une architecture extensible, par exemple avec une abstraction de type :
-
-```text
-ConditionEvaluator
-```
-
-ou une architecture équivalente.
-
----
-
-# 9. OPERATORS
-
-Prévoir différents opérateurs selon le type de donnée :
-
-```text
-EQUALS
-NOT_EQUALS
-CONTAINS
-NOT_CONTAINS
-STARTS_WITH
-ENDS_WITH
-GREATER_THAN
-GREATER_OR_EQUAL
-LESS_THAN
-LESS_OR_EQUAL
-IN
-NOT_IN
-IS_NULL
-IS_NOT_NULL
-```
-
-Pour les listes :
-
-```text
-CONTAINS
-NOT_CONTAINS
-```
-
-Pour les valeurs numériques :
-
-```text
->
->=
-<
-<=
-=
-!=
-```
-
-Pour les booléens :
-
-```text
-TRUE
-FALSE
-```
-
-L'architecture doit permettre d'ajouter de nouveaux opérateurs sans réécrire tout le moteur.
-
----
-
-# 10. EXCEPTIONS
-
-Une règle doit pouvoir avoir des exceptions.
-
-Exemple :
-
-```text
-IF
-    category = AVAILABILITY
-    AND confidence >= 0.80
-
-EXCEPT IF
-    matchedSolution = "Solution critique spéciale"
-```
-
-Les exceptions doivent être évaluées avant de considérer la règle comme applicable.
-
-Respecte le modèle actuel :
-
-```text
-rule_condition_group.block_type
-```
-
-avec :
-
-```text
-CONDITION
-EXCEPTION
-```
-
-Ne recrée pas une table `rule_exception` séparée sauf si l'implémentation démontre une nécessité réelle.
-
----
-
-# 11. ACTIONS DU BUSINESS RULE ENGINE
-
-Les actions doivent rester métier.
-
-Exemples possibles :
-
-```text
-REQUEST_HUMAN_VALIDATION
-SELECT_BUSINESS_CONTEXT
-SET_BUSINESS_DECISION
-MARK_FALLBACK
-SKIP_RULE
-STOP_EVALUATION
-TRIGGER_ROUTING
-```
-
-Attention :
-
-**ne permet pas au Business Rule Engine de modifier arbitrairement le PSI officiel.**
-
-Le PSI officiel vient de :
-
-```text
-solution_attribute.psi
-```
-
-et ne doit pas être une valeur générée dynamiquement par le LLM ou manipulée comme une priorité calculée.
-
-De même, ne crée pas des actions telles que :
-
-```text
-SET_PSI
-OVERRIDE_PRIORITY
-```
-
-si elles contredisent le modèle métier défini.
-
----
-
-# 12. ORDRE D'ÉVALUATION
-
-Respecter :
-
-```text
-business_rule.rule_evaluation_priority
-```
-
-Attention :
-
-ce champ signifie uniquement :
-
-> ordre dans lequel les règles sont évaluées.
-
-Il ne représente PAS :
-
-* PSI ;
-* criticité ;
-* priorité de l'alerte ;
-* priorité de notification.
-
-Si :
-
-```text
-rule A priority = 10
-rule B priority = 20
-```
-
-A est évaluée avant B.
-
----
-
-# 13. STOP ON MATCH
-
-Respecter :
-
-```text
-stop_on_match
-```
-
-Si :
-
-```text
-rule.matches == true
-AND rule.stop_on_match == true
-```
-
-alors arrêter l'évaluation des règles suivantes.
-
-Ne crée pas inutilement plusieurs modes globaux complexes si `stop_on_match` suffit au modèle actuel.
-
----
-
-# 14. RÈGLES MÉTIER PAR DÉFAUT
-
-Le système doit disposer d'un ensemble de règles par défaut représentant le comportement normal de V0.
-
-Ces règles doivent être identifiables comme :
-
-```text
-DEFAULT
-```
-
-ou via une architecture équivalente.
-
-Elles doivent être initialisées automatiquement lors de l'installation du système.
-
-Important :
-
-**ne mets pas uniquement leur comportement en dur dans Java.**
-
-Leur définition doit être suffisamment persistante pour que l'application sache quelles sont les règles normales.
-
-Si tu considères qu'une partie extrêmement technique doit rester dans le code, justifie cette décision dans le code/documentation.
-
----
-
-# 15. CONFIGURATION DES RÈGLES DE ROUTAGE
-
-Créer une interface Ops séparée pour :
-
-```text
-Routing Policies
-```
-
-Ne pas mélanger cette interface avec :
-
-```text
-Business Rules
-```
-
-Une politique de routage possède :
-
-```text
-code
-name
-description
-enabled
-priority
-steps[]
-```
-
----
-
-# 16. ROUTING POLICY EDITOR
-
-L'Ops doit pouvoir construire une séquence :
-
-```text
-Step 1
-Step 2
-Step 3
-Step 4
-...
-```
-
-Chaque étape doit contenir :
-
-```text
-step_order
-action_type
-target_role
-target_unit_type
-channel
-delay_after_seconds
-```
-
-Les actions doivent être basées sur le modèle actuel :
-
-```text
-VOICE_CALL
-VOICE_RETRY
-NEXT_PERSON
-SMS
-EMAIL
-NOTIFY_SUPERVISOR
-```
-
-Ne suppose pas que toutes les actions sont déjà implémentées techniquement.
-
-Si SMS/Email ne sont pas encore exécutables en V0, la configuration peut exister mais l'exécution doit respecter l'état réel de l'application.
-
----
-
-# 17. TARGET ROLE
-
-Le routage doit utiliser exclusivement les rôles métier existants :
-
-```text
-admin_role_type
-```
-
-Ne crée pas de nouveaux rôles arbitraires dans le frontend.
-
-Exemples :
-
-```text
-TAM
-DBA
-INFRA_ADMIN
-MANAGER
-...
-```
-
-Le rôle doit être résolu à un niveau organisationnel :
-
-```text
-SOLUTION
-DOMAIN
-POLE
-ENTITY
-```
-
-Donc :
-
-```text
-target_role
-+
-target_unit_type
-```
-
-déterminent la cible.
-
-Exemple :
-
-```text
-target_role = TAM
-target_unit_type = SOLUTION
-```
-
-signifie :
-
-> rechercher les personnes ayant le rôle TAM associées à la Solution concernée.
-
----
-
-# 18. RÉSOLUTION DES PERSONNES
-
-Le routage ne doit jamais recevoir directement une liste statique de personnes depuis la règle.
-
-Il doit résoudre dynamiquement les personnes depuis PostgreSQL.
-
-Exemple :
-
-```text
-Selected Solution
-      ↓
-organizational_unit
-      ↓
-unit_admin_assignment
-      ↓
-role
-      ↓
-person
-      ↓
-member_availability
-```
-
-Ensuite seulement :
-
-```text
-Person candidates
-      ↓
-ordering
-      ↓
-routing step
-      ↓
-notification
-```
-
-Prévoir clairement dans le code une abstraction du genre :
-
-```text
-PersonResolver
-```
-
-ou équivalent.
-
-Elle doit pouvoir déterminer :
-
-* personnes correspondant au rôle ;
-* niveau organisationnel ;
-* active/inactive ;
-* disponibilité ;
-* primary contact ;
-* ordre éventuel.
-
----
-
-# 19. ROUTAGE PAR DÉFAUT
-
-Le comportement normal doit être représenté par une politique de routage par défaut.
-
-Exemple conceptuel :
-
-```text
-Default Routing Policy
-
-Step 1
-    VOICE_CALL
-    TAM
-    SOLUTION
-    AUTO
-    delay = X
-
-Step 2
-    VOICE_RETRY
-    TAM
-    SOLUTION
-    AUTO
-    delay = Y
-
-Step 3
-    NEXT_PERSON
-    TAM
-    SOLUTION
-    delay = Z
-
-Step 4
-    NOTIFY_SUPERVISOR
-    MANAGER
-    DOMAIN
-```
-
-Les valeurs exactes ne doivent pas être inventées si elles ne sont pas déjà définies dans le projet.
-
-Si une valeur manque, rends-la configurable plutôt que de créer arbitrairement une règle métier.
-
----
-
-# 20. ROUTAGE CONFIGURABLE VS DEFAULT
-
-Le moteur doit suivre cette logique :
-
-```text
-Find applicable routing policies
-        |
-        v
-Existe-t-il une politique configurable correspondante ?
-        |
-       YES
-        |
-        v
-Utiliser la politique configurable
-        |
-       NO
-        |
-        v
-Utiliser la politique par défaut
-```
-
-Une politique configurable ne doit pas casser le comportement normal si elle :
-
-* est désactivée ;
-* est invalide ;
-* ne correspond pas ;
-* ne peut pas être résolue.
-
-Prévoir un fallback propre.
-
----
-
-# 21. INTÉGRATION AVEC LE RÉSULTAT LLM
-
-Le flux réel doit être :
-
-```text
-Dynatrace Alert
-       ↓
-Alert persistence
-       ↓
-Retrieve business candidates
-       ↓
-LLM classification
-       ↓
-ClassificationResponseValidator
-       ↓
-alert_llm_analysis
-       ↓
-Business Rule Engine
-       ↓
-Business decision
-       ↓
+# 13. Gestion Git et commits intermédiaires
+
+Pendant toute l'implémentation, utilise Git de manière propre et structurée.
+
+### Commits obligatoires
+
+Ne fais pas un seul énorme commit à la fin. Crée un commit après chaque **partie fonctionnelle importante et stable**.
+
+Exemples de commits attendus :
+
+1. `feat(rules): complete business rules evaluation`
+2. `feat(routing): complete routing and escalation engine`
+3. `feat(notification): implement email notification workflow`
+4. `feat(sms): implement Kafka SMS producer`
+5. `feat(voip): implement local VoIP simulation`
+6. `feat(audit): implement audit logging`
+7. `feat(alert): complete alert history and lifecycle`
+8. `feat(dashboard): implement supervisor and ops dashboards`
+9. `feat(frontend): integrate React frontend with backend`
+10. `test: complete backend integration tests`
+
+Les noms exacts peuvent être adaptés à ce qui est réellement implémenté.
+
+### Règles importantes pour les commits
+
+- Ne committe **que du code qui compile et fonctionne** autant que possible.
+- Avant chaque commit important :
+  - vérifier que le projet compile ;
+  - exécuter les tests pertinents ;
+  - vérifier les migrations Flyway ;
+  - vérifier que Docker Compose démarre correctement si la modification concerne l'infrastructure ;
+  - vérifier qu'aucune fonctionnalité précédente n'a été cassée.
+- Ne jamais faire de commit contenant volontairement du code cassé simplement pour sauvegarder l'état.
+- Ne pas utiliser `git reset --hard`, `git clean -fd` ou toute autre commande destructive sans mon autorisation explicite.
+- Ne pas supprimer ou écraser une fonctionnalité existante simplement parce qu'elle est plus facile à remplacer.
+- Avant une modification architecturale importante, examiner d'abord le code existant et expliquer brièvement pourquoi cette modification est nécessaire.
+- Après chaque commit important, indique clairement :
+  - le commit créé ;
+  - les fichiers/modules principaux modifiés ;
+  - ce qui fonctionne maintenant ;
+  - les tests exécutés ;
+  - les éventuels problèmes restant à traiter.MISSION — FINALISATION COMPLÈTE DU PROJET ALERTOPS
+
+Tu es maintenant chargé de FINALISER le projet AlertOps de bout en bout.
+
+L'objectif est d'obtenir aujourd'hui une version fonctionnelle, cohérente, testable et démontrable de l'application, avec un backend terminé et le frontend suffisamment complet pour exploiter réellement les fonctionnalités disponibles.
+
+Tu as accès au projet complet, au code Java/Spring Boot, au frontend React existant, au dossier `info/`, aux fichiers de configuration, aux migrations PostgreSQL, aux tests et aux conteneurs Docker déjà utilisés par le projet.
+
+Tu dois travailler comme un développeur senior chargé de terminer une application existante, et non comme quelqu'un qui doit simplement ajouter quelques classes.
+
+============================================================
+0. RÈGLE FONDAMENTALE : COMPRENDRE AVANT DE MODIFIER
+============================================================
+
+Avant toute modification importante :
+
+1. Analyse l'architecture actuelle.
+2. Analyse les modules/packages existants.
+3. Analyse les ports/adapters existants.
+4. Analyse les entités et les migrations PostgreSQL.
+5. Analyse les services et use cases existants.
+6. Analyse les tests existants.
+7. Analyse le fichier `info/prototype.jsx`.
+8. Analyse les autres fichiers du dossier `info/`.
+9. Analyse les configurations Docker existantes.
+10. Analyse les configurations `application.yml`, `application-*.yml`, etc.
+11. Identifie ce qui est réellement déjà fonctionnel.
+12. Identifie ce qui est seulement un squelette.
+13. Identifie les incohérences entre le code, la BDD, le prototype et les documents.
+
+IMPORTANT :
+
+Le dossier `info/` est principalement une SOURCE DE CONTEXTE.
+
+Il sert à comprendre :
+
+- le fonctionnement attendu ;
+- les formats JSON ;
+- les règles métier ;
+- les règles de routage ;
+- les données Dynatrace ;
+- les formats SMS ;
+- ElevenLabs ;
+- le prototype ;
+- les décisions fonctionnelles ;
+- l'état d'avancement.
+
+NE COPIE PAS aveuglément tout ce qui est dans `info/`.
+
+Si une information de `info/` est ancienne, incomplète ou contradictoire avec l'architecture actuelle, analyse le problème et choisis la solution techniquement cohérente.
+
+Tu es AUTORISÉ, lorsque cela est réellement nécessaire, à modifier :
+
+- Java ;
+- Spring Boot ;
+- packages ;
+- classes ;
+- interfaces ;
+- ports ;
+- adapters ;
+- repositories ;
+- entités ;
+- DTO ;
+- services ;
+- controllers ;
+- événements ;
+- migrations Flyway ;
+- tables PostgreSQL ;
+- configurations YAML ;
+- Docker Compose ;
+- frontend React ;
+- prototype ;
+- tests ;
+- conception interne.
+
+Mais :
+
+NE MODIFIE PAS UNE PARTIE QUI FONCTIONNE SANS RAISON.
+
+Toute modification d'architecture doit avoir une justification technique.
+
+Le but n'est pas de respecter artificiellement l'ancienne conception.
+
+Le but est d'obtenir une application réellement fonctionnelle.
+
+============================================================
+
+1. OBJECTIF GLOBAL
+
+============================================================
+
+À la fin de ton travail, le flux principal doit être capable de fonctionner de manière cohérente :
+
+Dynatrace
+   ↓
+Réception de l'alerte
+   ↓
+Validation / normalisation
+   ↓
+Persistance PostgreSQL
+   ↓
+Classification
+   ↓
+LLM si nécessaire
+   ↓
+Business Rules Engine
+   ↓
+Business Result
+   ↓
 Routing Engine
-       ↓
-Routing Policy
-       ↓
-PersonResolver
-       ↓
-Routing Steps
-       ↓
+   ↓
+Routing Decision
+   ↓
 Notification
-```
+   ├── EMAIL
+   ├── SMS / Kafka
+   └── VOIP
+          ↓
+       Escalade
+          ↓
+       Suivi / résolution
+          ↓
+       Audit / journalisation
 
-Le résultat du LLM doit être une **entrée du moteur**, pas la décision finale.
+Chaque étape doit être traçable.
 
-Utiliser notamment :
+============================================================
+2. CLASSIFICATION ET DONNÉES DYNATRACE
+============================================================
 
-```text
-alert_llm_analysis.confidence
-alert_llm_analysis.category
-alert_llm_analysis.problem_type
-alert_llm_analysis.matched_solution
-alert_llm_analysis.matched_domain
-alert_llm_analysis.matched_pole
-alert_llm_analysis.matched_entity
-alert_llm_analysis.resolved_psi
-alert_llm_analysis.requires_human_validation
-alert_llm_analysis.status
-```
+Analyse le module Classification existant.
 
----
+Ne suppose PAS que toutes les informations métier sont produites par le LLM.
 
-# 22. IMPORTANT — RESOLVED PSI
+Le JSON Dynatrace contient déjà des informations importantes, par exemple :
 
-Le champ :
+- problemId ;
+- displayId ;
+- title ;
+- status ;
+- severityLevel ;
+- impactLevel ;
+- affectedEntities ;
+- impactedEntities ;
+- rootCauseEntity ;
+- entityTags ;
+- managementZones ;
+- etc.
 
-```text
-resolved_psi
-```
+Tu dois distinguer clairement :
 
-dans `alert_llm_analysis` ne doit jamais être considéré comme une valeur fournie par le LLM.
+A. Informations directement disponibles dans Dynatrace.
 
-Il doit être résolu depuis :
+B. Informations calculées par notre application.
 
-```text
-solution_attribute.psi
-```
+C. Informations réellement produites par le LLM.
 
-après résolution de la Solution.
+D. Informations produites par le moteur de règles.
 
-Donc :
+Le LLM ne doit pas être utilisé pour quelque chose qui est déjà disponible de manière fiable dans Dynatrace.
 
-```text
-LLM matchedSolution
-        ↓
-resolve organizational_unit
-        ↓
-solution_attribute
-        ↓
-psi
-```
+Si une donnée peut être extraite directement du payload Dynatrace, privilégie cette approche.
 
-Le LLM ne décide pas du PSI.
+Le LLM doit être utilisé seulement lorsqu'une interprétation/classification est réellement nécessaire.
 
----
+============================================================
+3. BUSINESS RULE ENGINE
+============================================================
 
-# 23. FALLBACKS
+Le moteur de règles métier est une partie CENTRALE du projet.
 
-Prévoir explicitement les cas :
+Analyse complètement :
 
-### LLM indisponible
+- BusinessRuleEngine ;
+- ConditionEvaluator ;
+- BusinessRule ;
+- BusinessRuleContext ;
+- RuleCondition ;
+- RuleConditionGroup ;
+- RuleAction ;
+- BusinessDecision ;
+- RuleOrigin ;
+- les repositories ;
+- les entités de persistence ;
+- les migrations ;
+- les tests existants.
 
-```text
-LLM unavailable
-→ fallback métier
-```
+Il existe deux types de règles :
 
-### JSON invalide
+1. DEFAULT
+2. CONFIGURED
 
-```text
-Classification fallback
-→ règles métier fallback
-```
+Les règles CONFIGURED doivent avoir priorité sur les règles DEFAULT lorsque la conception actuelle le prévoit.
 
-### confidence faible
+Les règles DEFAULT constituent le comportement de base de l'application.
 
-```text
-LOW_CONFIDENCE
-→ règles correspondantes
-```
+Le moteur doit pouvoir :
 
-### Solution inconnue
+- charger les règles actives ;
+- respecter leur priorité/ordre ;
+- évaluer les conditions ;
+- gérer les groupes AND/OR ;
+- produire les actions ;
+- produire un BusinessDecision ;
+- conserver la traçabilité de la règle déclenchée ;
+- journaliser l'exécution ;
+- gérer l'absence de règle correspondante ;
+- gérer les cas d'erreur.
 
-```text
-invalid candidate
-→ fallback
-```
+Vérifie également que les règles par défaut correspondent réellement au comportement métier attendu.
 
-### aucune règle configurable
+NE TE LIMITE PAS aux tests existants.
 
-```text
-default business rule
-```
+Les tests existants montrent une partie du comportement attendu, mais ils ne constituent pas nécessairement toute la spécification.
 
-### aucune politique de routage configurable
-
-```text
-default routing policy
-```
-
-### aucune personne trouvée
-
-Prévoir un comportement explicite :
-
-```text
-supervisor escalation
-```
-
-ou autre comportement défini par la configuration.
-
-Ne jamais laisser le système arriver à un état silencieux.
-
----
-
-# 24. PERSISTENCE POSTGRESQL
-
-Le modèle actuel contient déjà :
-
-```text
-business_rule
-rule_condition_group
-rule_condition
-rule_action
-rule_execution
-routing_policy
-routing_step
-routing_execution
-routing_history
-routing_response
-```
-
-Utilise ce modèle comme base.
-
-Mais tu es autorisé à le modifier si l'implémentation réelle révèle un problème.
-
-Par exemple :
-
-* ajouter une colonne ;
-* ajouter une contrainte ;
-* ajouter un index ;
-* modifier une relation ;
-* ajouter un discriminant ;
-* modifier un type ;
-* ajouter une table si réellement nécessaire.
-
-**Ne conserve pas une conception uniquement parce qu'elle existe actuellement.**
-
-Si une modification du MLD est nécessaire pour obtenir un système propre, effectue-la.
-
----
-
-# 25. DEFAULT RULES EN BASE
-
-Décide intelligemment comment représenter les règles par défaut.
-
-Une possibilité est :
-
-```text
-business_rule
-```
-
-contient également les règles par défaut avec un attribut permettant de les distinguer.
-
-Par exemple :
-
-```text
-rule_origin = DEFAULT
-rule_origin = CONFIGURED
-```
-
-ou une autre solution techniquement meilleure.
-
-Même logique pour :
-
-```text
-routing_policy
-```
-
-L'objectif est que le moteur puisse savoir :
-
-```text
-DEFAULT
-```
-
-vs
-
-```text
-CONFIGURED
-```
-
-sans dupliquer toute la logique.
-
-Si tu choisis une autre architecture, justifie-la.
-
----
-
-# 26. SEED / INITIALISATION
-
-Les règles par défaut doivent être installées automatiquement.
-
-Étudier le mécanisme approprié au projet actuel :
-
-* migration SQL ;
-* Flyway ;
-* data initializer ;
-* autre mécanisme déjà utilisé.
-
-Ne crée pas un mécanisme parallèle inutile.
-
-L'installation d'une nouvelle instance doit permettre d'obtenir immédiatement :
-
-```text
-Default Business Rules
-+
-Default Routing Policies
-```
-
-sans configuration manuelle obligatoire.
-
----
-
-# 27. SPRING BOOT — ARCHITECTURE
-
-Respecter autant que possible l'architecture actuelle du projet :
-
-```text
-domain
-application
-infrastructure
-```
-
-ou l'organisation déjà présente.
-
-Séparer clairement :
-
-```text
+============================================================
+4. CONFIGURATION DES RÈGLES MÉTIER
+============================================================
+
+La configuration des règles doit être réellement persistante.
+
+Vérifie :
+
+BDD
+ ↓
+BusinessRule
+ ↓
+Conditions
+ ↓
+ConditionGroups
+ ↓
+Actions
+ ↓
 BusinessRuleEngine
-RoutingEngine
-ConditionEvaluator
-ActionExecutor
-RoutingPolicySelector
-PersonResolver
+
+Une règle créée/modifiée depuis la configuration doit réellement être utilisée par le moteur.
+
+Il ne faut PAS avoir :
+
+Frontend
+ ↓
+fausse configuration
+ ↓
+BDD
+
+alors que le moteur Java continue d'utiliser des règles codées en dur.
+
+La configuration doit réellement influencer l'exécution.
+
+Si la conception actuelle ne permet pas cela, corrige-la.
+
+============================================================
+5. ROUTING ENGINE
+============================================================
+
+Analyse complètement le moteur de routage.
+
+Il doit être réellement connecté au résultat du Business Rule Engine.
+
+Flux attendu :
+
+BusinessDecision
+        ↓
+Routing Engine
+        ↓
+Routing Policy
+        ↓
+Organizational Unit
+        ↓
+Members
+        ↓
+Channel
+        ↓
+Escalation Policy
+        ↓
+Routing Decision
+
+Vérifie :
+
+- priorité des politiques ;
+- politiques DEFAULT ;
+- politiques CONFIGURED si présentes ;
+- unité organisationnelle ;
+- membres ;
+- disponibilité ;
+- ordre des administrateurs ;
+- canaux ;
+- niveaux d'escalade ;
+- timeout ;
+- nombre maximal de tentatives ;
+- action terminale.
+
+Le routage ne doit pas être simplement simulé dans une méthode.
+
+Il doit utiliser réellement les données configurées.
+
+============================================================
+6. EMAIL
+============================================================
+
+Implémente/finalise l'envoi d'e-mail.
+
+Le service Mail est déjà disponible dans Docker.
+
+Analyse sa configuration existante.
+
+Le backend doit :
+
+- sélectionner le destinataire selon le Routing Decision ;
+- construire le message ;
+- envoyer l'e-mail ;
+- enregistrer la tentative ;
+- enregistrer le résultat technique ;
+- gérer les erreurs ;
+- journaliser l'opération.
+
+IMPORTANT :
+
+Un e-mail envoyé ne signifie PAS que l'alerte est "prise en charge".
+
+Il faut distinguer :
+
+EMAIL_SENT
+EMAIL_DELIVERY_FAILED
+BUSINESS_ACKNOWLEDGED
+INCIDENT_RESOLVED
+
+Ne mélange pas ces états.
+
+============================================================
+7. SMS + KAFKA
+============================================================
+
+IMPORTANT :
+
+NE CRÉE PAS un service SMS.
+
+Le service SMS appartient à une autre infrastructure/service de l'entreprise.
+
+Notre application est seulement PRODUCTEUR Kafka.
+
+Kafka est déjà disponible dans Docker.
+
+Il existe déjà :
+
+- le cluster Kafka ;
+- Kafka UI.
+
+Notre responsabilité :
+
+AlertOps
+   ↓
+Kafka Producer
+   ↓
+topic SMS
+   ↓
+JSON SMS attendu par l'entreprise
+
+Le format JSON SMS est déjà disponible dans le dossier `info/`.
+
+Utilise ce format comme référence.
+
+Le backend doit être capable de produire exactement le payload attendu.
+
+Il doit :
+
+- construire le JSON ;
+- récupérer les informations nécessaires ;
+- envoyer le message au topic ;
+- gérer les erreurs Kafka ;
+- journaliser l'envoi ;
+- enregistrer le message/correlationId si nécessaire.
+
+NE CRÉE PAS un fake SMS provider.
+
+Kafka est notre intégration réelle.
+
+============================================================
+8. PROBLÈME IMPORTANT : SUIVI APRÈS SMS / EMAIL
+============================================================
+
+C'est une partie importante du projet.
+
+Contrairement au VoIP :
+
+VoIP :
+    appel
+      ↓
+    admin répond
+      ↓
+    confirmation possible
+
+SMS / EMAIL :
+
+```
+envoi
+  ↓
+pas nécessairement d'accusé métier
+  ↓
+impossible de savoir directement si l'admin a pris en charge
+  ↓
+il faut donc suivre l'état de l'incident dans Dynatrace
 ```
 
-Éviter un énorme service du type :
+NE DÉDUIS PAS :
 
-```text
-AlertService
-```
+SMS_SENT = ALERT_HANDLED
 
-qui ferait tout.
+C'est faux.
 
----
+NE DÉDUIS PAS :
 
-# 28. BUSINESS RULE ENGINE
+EMAIL_SENT = ALERT_HANDLED
 
-Créer une API métier claire, par exemple conceptuellement :
+C'est également faux.
 
-```java
-BusinessDecision evaluate(BusinessRuleContext context);
-```
+Le système doit distinguer :
 
-Le contexte doit contenir suffisamment d'informations pour évaluer les règles sans que chaque condition fasse directement des requêtes SQL.
+1. notification technique envoyée ;
+2. notification technique échouée ;
+3. incident toujours actif ;
+4. incident résolu ;
+5. timeout de suivi ;
+6. éventuellement escalade.
 
-Construire d'abord un contexte métier :
+============================================================
+9. VÉRIFICATION DU STATUS DYNATRACE
+============================================================
 
-```text
-Alert
-LLM Analysis
-Resolved Solution
-Domain
-Pole
-Entity
-PSI
-People information if required
-...
-```
+Très important :
 
-Puis évaluer les règles.
+Le webhook Dynatrace est utilisé pour recevoir l'alerte initiale.
 
-Éviter autant que possible :
+Mais pour vérifier ultérieurement si le problème est toujours actif/résolu, ne dépends pas uniquement du webhook initial.
 
-```text
-ConditionEvaluator → repository
-ConditionEvaluator → repository
-ConditionEvaluator → repository
-```
+Il faut utiliser l'API Dynatrace de consultation du problème lorsque c'est nécessaire.
 
-pour chaque condition.
+Le principe attendu est :
 
-Préparer le contexte en amont.
-
----
-
-# 29. ROUTING ENGINE
-
-Créer une API métier indépendante, par exemple conceptuellement :
-
-```java
-RoutingDecision buildRoutingDecision(RoutingContext context);
-```
+T0 :
+Dynatrace → Webhook → AlertOps
 
 Puis :
 
-```text
-RoutingPolicySelector
-       ↓
-RoutingStepExecutor
-       ↓
-PersonResolver
-       ↓
-Notification service
-```
+T0 + délai configurable
+        ↓
+AlertOps → Dynatrace API
+        ↓
+récupération du statut actuel
+        ↓
+status RESOLVED ?
+        ├── YES → incident résolu
+        └── NO  → toujours actif → continuer surveillance / escalade
 
-Le moteur de routage ne doit pas connaître les détails internes du LLM.
+IMPORTANT :
 
-Il doit recevoir le résultat métier dont il a besoin.
+NE CHOISIS PAS arbitrairement un délai fixe sans analyser le projet.
 
----
+Recherche dans :
 
-# 30. EXECUTION ET HISTORIQUE
+- code ;
+- configuration ;
+- dossier info ;
+- règles ;
+- prototype ;
+- documentation existante ;
 
-Chaque évaluation réelle doit être traçable.
+s'il existe déjà une notion de :
 
-Utiliser :
+- timeout ;
+- escalation delay ;
+- retry interval ;
+- polling interval ;
+- notification timeout ;
+- max attempts.
 
-```text
-rule_execution
-```
+Si elle existe, réutilise-la.
 
-pour savoir :
+Si elle n'existe pas, introduis une configuration explicite.
 
-* quelle règle ;
-* quelle alerte ;
-* quel résultat LLM ;
-* matched ou non ;
-* durée ;
-* date.
+Par exemple :
 
-Utiliser :
+alertops:
+  monitoring:
+    resolution-check:
+      initial-delay: ...
+      polling-interval: ...
+      max-duration: ...
+      max-attempts: ...
 
-```text
-routing_execution
-routing_history
-routing_response
-```
+Les valeurs doivent être CONFIGURABLES.
 
-pour suivre :
+Ne hardcode pas les délais métier.
 
-* politique sélectionnée ;
-* étape courante ;
-* personne ciblée ;
-* action ;
-* réponse ;
-* progression.
+============================================================
+10. MÉCANISME DE SUIVI
+============================================================
 
-Ne pas supprimer cette traçabilité simplement pour réduire le nombre de tables.
+Choisis la meilleure approche technique selon l'architecture actuelle.
 
-Ces tables ont une fonction différente des tables de configuration.
+Possibilités :
 
----
+- Scheduled task ;
+- Spring Scheduler ;
+- job périodique ;
+- événement + scheduled retry ;
+- autre mécanisme cohérent.
 
-# 31. AUDIT
+Le mécanisme doit être robuste.
 
-Conserver :
+Exemple :
 
-```text
-audit_log
-audit_log_detail
-```
+Notification envoyée
+        ↓
+NotificationState = SENT
+        ↓
+création d'un suivi
+        ↓
+attente du délai
+        ↓
+Dynatrace API
+        ↓
+status ?
+        ├── RESOLVED
+        │      ↓
+        │  clôturer le suivi
+        │
+        └── ACTIVE
+               ↓
+        appliquer la politique d'escalade
+               ↓
+        nouvelle notification
+               ↓
+        nouveau contrôle
 
-pour les actions importantes.
+Évite les boucles bloquantes dans les requêtes HTTP.
 
-L'audit n'est pas un doublon de `rule_execution`.
+Ne fais pas attendre un thread HTTP pendant plusieurs minutes.
 
-Différence :
+Le suivi doit être asynchrone.
 
-```text
-rule_execution
-=
-trace technique de l'évaluation d'une règle
-```
+============================================================
+11. VOIP
+============================================================
 
-alors que :
+Le projet doit utiliser une abstraction.
 
-```text
-audit_log
-=
-traçabilité fonctionnelle/sécurité de l'action effectuée
-```
+Le domaine/application ne doit PAS dépendre directement d'un fournisseur.
 
-Ne fusionne pas ces concepts sans démontrer que l'un peut complètement remplacer l'autre.
+Créer/utiliser un port du type :
 
----
-
-# 32. FRONTEND
-
-Dans `/info/prototype.jsx`, ajouter les écrans nécessaires.
-
-Créer au minimum :
-
-```text
-Ops
- ├── Business Rules
- │     ├── Rules list
- │     ├── Create rule
- │     ├── Edit rule
- │     └── Rule details
- │
- └── Routing Policies
-       ├── Policies list
-       ├── Create policy
-       ├── Edit policy
-       └── Policy details
-```
-
-Pour les conditions :
-
-```text
-[Field]
-[Operator]
-[Value]
-```
-
-avec :
-
-```text
-+ Add condition
-+ Add group
-+ Add exception
-```
-
-Pour les actions :
-
-```text
-+ Add action
-```
-
-Pour le routage :
-
-```text
-Step 1
-Step 2
-Step 3
-```
-
-avec possibilité :
-
-* d'ajouter ;
-* supprimer ;
-* réordonner ;
-* modifier ;
-* activer/désactiver.
-
----
-
-# 33. VALIDATION FRONTEND
-
-Empêcher autant que possible :
-
-* une condition vide ;
-* une valeur incompatible ;
-* un rôle inexistant ;
-* un niveau organisationnel invalide ;
-* une étape sans action ;
-* un délai négatif ;
-* deux étapes avec le même ordre si cela est interdit ;
-* une politique sans étape ;
-* une règle sans condition si le modèle l'interdit.
-
-Mais la validation frontend ne remplace jamais la validation backend.
-
----
-
-# 34. VALIDATION BACKEND
-
-Le backend doit considérer les données venant du frontend comme non fiables.
-
-Valider :
-
-* enums ;
-* opérateurs ;
-* types ;
-* rôles ;
-* niveaux ;
-* actions ;
-* délais ;
-* références ;
-* cohérence des groupes ;
-* cohérence des exceptions ;
-* permissions Ops.
-
----
-
-# 35. API REST
-
-Créer les endpoints nécessaires pour :
-
-### Business Rules
-
-```text
-GET    /api/business-rules
-GET    /api/business-rules/{id}
-POST   /api/business-rules
-PUT    /api/business-rules/{id}
-DELETE /api/business-rules/{id}
-PATCH  /api/business-rules/{id}/enabled
-```
-
-### Routing Policies
-
-```text
-GET    /api/routing-policies
-GET    /api/routing-policies/{id}
-POST   /api/routing-policies
-PUT    /api/routing-policies/{id}
-DELETE /api/routing-policies/{id}
-PATCH  /api/routing-policies/{id}/enabled
-```
-
-Adapte les URLs aux conventions déjà utilisées dans le projet.
-
----
-
-# 36. TESTER LE MOTEUR
-
-Ne te limite surtout pas aux tests CRUD.
-
-Créer des tests unitaires pour :
-
-### Business Rules
-
-```text
-condition true
-condition false
-AND
-OR
-exception
-multiple groups
-priority
-stop_on_match
-fallback
-default rule
-configured rule
-```
-
-### Routing
-
-```text
-policy selection
-default policy
-configured policy
-role resolution
-unit resolution
-person ordering
-availability
-step progression
-timeout
-accepted
-rejected
-supervisor escalation
-```
-
-### Integration
-
-Tester un scénario complet :
-
-```text
-Alert
-→ LLM result
-→ business rules
-→ business decision
-→ routing policy
-→ person resolution
-→ routing execution
-```
-
----
-
-# 37. SCÉNARIOS CONCRETS À IMPLÉMENTER
-
-Créer au moins quelques scénarios réalistes.
-
-### Scénario 1 — comportement par défaut
-
-```text
-Alert
-→ LLM confidence élevée
-→ Solution trouvée
-→ aucune règle configurable correspondante
-→ règle métier par défaut
-→ politique de routage par défaut
-→ TAM de la Solution
-→ notification
-```
-
-### Scénario 2 — règle configurable
-
-```text
-Alert
-→ LLM result
-→ règle configurable correspondante
-→ comportement configuré
-→ routage correspondant
-```
-
-### Scénario 3 — faible confidence
-
-```text
-LLM confidence < threshold
-→ LOW_CONFIDENCE
-→ règle correspondante
-→ validation humaine / fallback
-```
-
-### Scénario 4 — aucune personne
-
-```text
-Routing
-→ aucun TAM disponible
-→ étape suivante
+VoiceCallPort
 ou
-→ supervisor
-```
+VoipNotificationPort
 
-### Scénario 5 — timeout
+Le moteur de routage doit seulement demander :
 
-```text
-VOICE_CALL
-→ TIMEOUT
-→ delay
-→ next step
-```
+call(phoneNumber, message)
 
----
+Il ne doit pas connaître :
 
-# 38. NE PAS INVENTER LES RÈGLES MÉTIER
+- Asterisk ;
+- SIP ;
+- WebRTC ;
+- Twilio ;
+- etc.
 
-Tu dois être créatif sur **l'architecture et l'UX**, mais ne dois pas inventer comme vérité métier des règles qui n'ont jamais été définies.
+============================================================
+12. VOIP LOCAL POUR LA DÉMONSTRATION
+============================================================
 
-Lorsqu'une règle métier exacte manque :
+Nous avons choisi une simulation VoIP locale avec Docker.
 
-* rendre le comportement configurable ;
-* créer une règle par défaut raisonnable uniquement si elle est explicitement nécessaire au fonctionnement ;
-* documenter l'hypothèse ;
-* éviter de coder silencieusement une décision métier arbitraire.
+Objectif :
 
----
+AlertOps
+ ↓
+VoipPort
+ ↓
+Asterisk / PBX local
+ ↓
+SIP/WebRTC
+ ↓
+Softphone navigateur
 
-# 39. SI LE MODÈLE ACTUEL EST INSUFFISANT
+Nous voulons pouvoir démontrer :
 
-Tu as explicitement l'autorisation de modifier :
+- appel entrant ;
+- sonnerie ;
+- réponse ;
+- refus ;
+- raccrochage ;
+- état de l'appel ;
+- acquittement.
 
-```text
-Java
-SQL
-schema.sql
-MLD
-entities
-DTO
-repositories
-services
-controllers
-frontend
-prototype.jsx
-tests
-```
+Utilise des extensions SIP fictives.
 
-si nécessaire.
+La table Person contient déjà un champ `phone`.
 
-Mais avant de modifier une partie importante :
+Exemple :
 
-1. analyser l'architecture actuelle ;
-2. identifier le problème ;
-3. choisir la solution la plus cohérente ;
-4. appliquer la modification ;
-5. vérifier les impacts sur les autres modules.
+Person:
+1001
+1002
+1003
 
-Ne fais pas de modifications massives sans raison.
+Ces valeurs représentent les extensions internes de test.
 
----
+NE DUPLIQUE PAS les personnes métier dans Asterisk.
 
-# 40. COMPATIBILITÉ AVEC LE MODÈLE V2 ACTUEL
+Asterisk connaît seulement ses extensions SIP.
 
-Respecter notamment :
+AlertOps connaît les personnes.
 
-```text
-organizational_unit
-solution_attribute
-person
-admin_role_type
-unit_admin_assignment
-member_availability
+La correspondance se fait via `Person.phone`.
 
-alert
-alert_entity
-alert_comment
+============================================================
+13. DOCKER VOIP
+============================================================
 
-alert_llm_analysis
+Ajoute les conteneurs nécessaires dans :
 
-business_rule
-rule_condition_group
-rule_condition
-rule_action
-rule_execution
+docker-compose.override.yaml
 
-routing_policy
-routing_step
-routing_execution
-routing_history
-routing_response
+pour permettre la démonstration locale du VoIP.
 
-notification
-notification_template
-notification_recipient
-notification_attempt
-voice_message
+Tu peux modifier le Docker Compose existant si nécessaire.
 
-audit_log
-audit_log_detail
-system_event
-application_metric
-```
+Le système doit être reproductible.
 
-Les règles doivent utiliser ce modèle plutôt que créer des tables parallèles ayant la même responsabilité.
+Documente clairement :
 
----
+- ports ;
+- volumes ;
+- configuration SIP ;
+- WebRTC ;
+- extensions ;
+- credentials de test ;
+- réseau Docker ;
+- interaction avec Spring Boot.
 
-# 41. CE QUE JE VEUX À LA FIN
+Ne crée pas une architecture inutilement complexe.
 
-À la fin de cette tâche, je veux un système réellement fonctionnel et pas seulement un prototype visuel.
+Si une solution plus simple et fiable permet d'obtenir le même résultat, utilise-la.
 
-Je dois pouvoir :
+============================================================
+14. ELEVENLABS / TTS
+============================================================
 
-```text
-1. ouvrir l'interface Ops ;
-2. créer une règle métier ;
-3. définir ses conditions ;
-4. définir ses exceptions ;
-5. définir ses actions ;
-6. sauvegarder ;
-7. retrouver cette règle depuis PostgreSQL ;
-8. l'activer ;
-9. recevoir une alerte ;
-10. obtenir le résultat LLM ;
-11. faire évaluer la règle ;
-12. observer que la règle correspond ;
-13. observer la décision produite ;
-14. sélectionner une politique de routage ;
-15. résoudre les personnes ;
-16. exécuter les étapes ;
-17. enregistrer l'exécution ;
-18. voir l'historique.
-```
+Le projet utilise ElevenLabs pour le TTS.
 
-Et également :
+Les informations nécessaires existent déjà dans le dossier `info/`.
 
-```text
-aucune règle configurable correspondante
-        ↓
-règle par défaut
-        ↓
-routage par défaut
-```
+Analyse-les.
 
-doit fonctionner réellement.
+NE RECOPIE PAS les credentials dans le code.
 
----
+Utilise :
 
-# 42. LIVRABLES ATTENDUS
+- variables d'environnement ;
+- configuration externe ;
+- secrets ;
+- application.yml avec placeholders.
 
-À la fin, fournis :
+Flux :
 
-### Code
+Routing Decision
+      ↓
+Voice notification
+      ↓
+Generate voice message
+      ↓
+ElevenLabs TTS
+      ↓
+Audio
+      ↓
+VoIP
+      ↓
+Admin
 
-Tous les fichiers Java nécessaires.
+Le texte envoyé à ElevenLabs doit être généré à partir du contexte réel de l'alerte et de la décision métier.
 
-### Database
+============================================================
+15. ESCALADE
+============================================================
 
-Les modifications nécessaires de :
+Finalise l'escalade.
 
-```text
-schema.sql
-migrations
-seed/default data
-```
+Cas général :
 
-### Frontend
+Notification
+ ↓
+attente
+ ↓
+incident résolu ?
+ ├── oui → FIN
+ └── non
+      ↓
+niveau suivant
+      ↓
+nouvelle notification
 
-Les modifications de :
+Pour VoIP, il existe une possibilité supplémentaire :
 
-```text
-/info/prototype.jsx
-```
+CALLING
+ ↓
+ANSWERED ?
+ ├── oui → confirmation / prise en charge
+ └── non → tentative suivante
 
-et les composants réels correspondants s'ils existent.
+Pour SMS/EMAIL :
 
-### Tests
+SENT
+ ↓
+pas d'ACK métier direct
+ ↓
+vérification Dynatrace
+ ↓
+RESOLVED ?
+ ├── oui → terminé
+ └── non → escalade
 
-Tests unitaires + intégration des moteurs.
+Cette différence doit être représentée dans le code.
 
-### Documentation
+============================================================
+16. JOURNALISATION / AUDIT
+============================================================
 
-Ajouter une courte documentation expliquant :
+Finalise la partie audit/logging.
 
-```text
-Business Rule Engine
+Il faut pouvoir répondre à :
+
+- quelle alerte ?
+- quand ?
+- quelle classification ?
+- quelle règle ?
+- quelle décision métier ?
+- quelle politique de routage ?
+- quel destinataire ?
+- quel canal ?
+- quelle tentative ?
+- quel résultat ?
+- quelle escalade ?
+- quelle résolution ?
+- quelle erreur ?
+
+Évite de créer des dépendances absurdes entre Audit et tous les modules.
+
+Privilégie une journalisation centralisée avec des événements/identifiants permettant de retracer le workflow.
+
+Utilise des correlation IDs / alert IDs / notification IDs lorsque pertinent.
+
+L'audit doit être consultable depuis le frontend.
+
+============================================================
+17. POSTGRESQL / FLYWAY
+============================================================
+
+Analyse les tables existantes.
+
+NE CRÉE PAS de nouvelles tables si une table existante peut être correctement utilisée.
+
+Mais si le modèle actuel ne permet pas de réaliser le suivi, l'escalade ou l'audit correctement, modifie le schéma.
+
+Utilise Flyway pour les migrations.
+
+Chaque changement BDD doit avoir sa migration.
+
+Vérifie :
+
+- FK ;
+- indexes ;
+- contraintes ;
+- enums/statuts ;
+- timestamps ;
+- UUID ;
+- relations ;
+- cohérence avec les entités JPA.
+
+La BDD doit refléter le modèle réel du workflow.
+
+============================================================
+18. TESTS BACKEND
+============================================================
+
+Finalise les tests.
+
+Il faut au minimum couvrir :
+
+CLASSIFICATION
+
+- payload normal ;
+- confiance faible ;
+- fallback ;
+- erreur LLM.
+
+BUSINESS RULES
+
+- règle configurée prioritaire ;
+- règle default ;
+- conditions ;
+- AND ;
+- OR ;
+- absence de règle ;
+- action métier.
+
+ROUTING
+
+- politique trouvée ;
+- politique absente ;
+- membre disponible ;
+- membre indisponible ;
+- escalade ;
+- niveau parent ;
+- terminal action.
+
+EMAIL
+
+- envoi réussi ;
+- erreur.
+
+KAFKA
+
+- payload SMS ;
+- publication ;
+- erreur.
+
+VOIP
+
+- appel ;
+- ANSWERED ;
+- REJECTED ;
+- NO_ANSWER ;
+- HANGUP ;
+- escalade.
+
+RESOLUTION MONITORING
+
+- incident RESOLVED ;
+- incident ACTIVE ;
+- timeout ;
+- nouvelle vérification ;
+- arrêt du polling.
+
+AUDIT
+
+- événement journalisé ;
+- corrélation correcte.
+
+Utilise Mockito/AssertJ comme déjà utilisé dans le projet lorsque cela est pertinent.
+
+============================================================
+19. FRONTEND
+============================================================
+
+Après avoir stabilisé le backend, complète le frontend existant.
+
+Le frontend principal est ici :
+
+C:\Users\DELL\Desktop\PFA\frontEnd
+
+Analyse d'abord ce qui existe.
+
+NE SUPPRIME PAS inutilement la base React existante.
+
+Tu dois connecter réellement le frontend aux APIs backend.
+
+============================================================
+20. PROTOTYPE
+============================================================
+
+Le fichier :
+
+info/prototype.jsx
+
+sert de référence visuelle et fonctionnelle.
+
+Il contient certaines pages déjà conçues.
+
+Mais il est INCOMPLET.
+
+Il manque notamment des éléments/pages autour de :
+
+- Alertes ;
+- Historique ;
+- Dashboard ;
+- Statistiques ;
+- fonctionnalités superviseur ;
+- journalisation/audit ;
+- consultation des traitements.
+
+Tu dois compléter ce qui manque.
+
+IMPORTANT :
+
+NE MODIFIE PAS arbitrairement les pages concernant la configuration des moteurs de règles/routage si elles correspondent déjà au comportement attendu.
+
+Concentre les améliorations frontend principalement sur :
+
+- affichage des alertes ;
+- détails d'une alerte ;
+- historique ;
+- audit ;
+- dashboard ;
+- statistiques ;
+- suivi des notifications ;
+- suivi des escalades ;
+- fonctionnalités superviseur ;
+- consultation des résultats.
+
+============================================================
+21. DASHBOARD
+============================================================
+
+Le dashboard actuel est trop pauvre.
+
+Améliore-le significativement.
+
+Il doit donner une vision opérationnelle.
+
+Exemples de statistiques utiles :
+
+- nombre total d'alertes ;
+- alertes critiques ;
+- alertes ouvertes ;
+- alertes résolues ;
+- alertes en attente de validation ;
+- taux de résolution ;
+- alertes nécessitant une intervention humaine ;
+- notifications envoyées ;
+- notifications échouées ;
+- SMS ;
+- emails ;
+- appels VoIP ;
+- escalades ;
+- temps moyen de traitement ;
+- répartition par catégorie ;
+- répartition par sévérité ;
+- répartition par application ;
+- évolution temporelle.
+
+N'ajoute pas toutes ces statistiques si les données backend ne permettent pas de les calculer correctement.
+
+Le frontend ne doit PAS inventer des données.
+
+S'il manque une API backend pour une statistique réellement utile, crée l'API correspondante.
+
+============================================================
+22. PAGE ALERTES
+============================================================
+
+Créer/compléter une vraie page de supervision.
+
+Elle doit permettre au minimum :
+
+- liste des alertes ;
+- statut ;
+- sévérité ;
+- application ;
+- catégorie ;
+- date ;
+- confiance IA ;
+- statut de résolution ;
+- notification ;
+- escalade ;
+- détail.
+
+Ajouter filtrage/recherche/pagination si cohérent avec le projet.
+
+============================================================
+23. HISTORIQUE
+============================================================
+
+Créer une vue permettant de comprendre le cycle de vie :
+
+ALERTE
+ ↓
+CLASSIFICATION
+ ↓
+RULE
+ ↓
+BUSINESS DECISION
+ ↓
+ROUTING
+ ↓
+NOTIFICATION
+ ↓
+ESCALATION
+ ↓
+RESOLUTION
+
+Afficher les événements de manière claire.
+
+============================================================
+24. SUPERVISEUR
+============================================================
+
+Compléter les fonctions utiles du superviseur.
+
+Le superviseur doit pouvoir consulter notamment :
+
+- alertes ;
+- alertes nécessitant validation ;
+- notifications ;
+- historique ;
+- audit ;
+- escalades ;
+- décisions ;
+- éventuellement réaffectation si le backend la supporte.
+
+Ne crée pas des fonctions fictives qui ne sont pas supportées par le backend.
+
+============================================================
+25. AUTHENTIFICATION
+============================================================
+
+Respecte le mécanisme d'authentification déjà présent dans le projet.
+
+Ne contourne pas la sécurité uniquement pour simplifier le frontend.
+
+Si certains endpoints doivent être protégés, vérifie :
+
+- rôles ;
+- superviseur ;
+- opérateur ;
+- permissions.
+
+============================================================
+26. INTÉGRATION FRONTEND/BACKEND
+============================================================
+
+Le frontend doit utiliser réellement les APIs backend.
+
+Pas de données hardcodées pour simuler les statistiques.
+
+Pas de fausses alertes permanentes.
+
+Pas de fake routing decision.
+
+Pas de faux historique.
+
+Les données doivent venir du backend.
+
+Si une API manque :
+
+1. identifier le besoin ;
+2. créer le endpoint ;
+3. créer DTO ;
+4. service ;
+5. repository si nécessaire ;
+6. test ;
+7. connecter React.
+
+============================================================
+27. CONFIGURATION
+============================================================
+
+Toutes les informations sensibles doivent être externalisées.
+
+NE COMMITTE PAS :
+
+- API keys ;
+- tokens ;
+- passwords ;
+- secrets.
+
+Utilise les variables d'environnement.
+
+Exemples :
+
+ELEVENLABS_API_KEY
+DYNATRACE_API_TOKEN
+DYNATRACE_URL
+KAFKA_BOOTSTRAP_SERVERS
+MAIL_HOST
+MAIL_PORT
+VOIP_SIP_USER
+VOIP_SIP_PASSWORD
+
+Adapte les noms à la convention existante.
+
+============================================================
+28. DOCKER
+============================================================
+
+Les conteneurs existants doivent être réutilisés.
+
+Tu as déjà notamment :
+
+- PostgreSQL ;
+- Kafka ;
+- Kafka UI ;
+- service Mail ;
+- autres services existants.
+
+NE DUPLIQUE PAS ces services.
+
+Ajoute seulement ce qui manque réellement.
+
+Pour VoIP, ajoute les conteneurs nécessaires.
+
+Vérifie que tous les services communiquent correctement sur le réseau Docker.
+
+============================================================
+29. API DYNATRACE
+============================================================
+
+Analyse les fichiers `info/` pour trouver :
+
+- URL ;
+- endpoints ;
+- authentification ;
+- exemples ;
+- payload ;
+- IDs ;
+- status.
+
+Ne suppose pas l'API si les informations du projet la documentent déjà.
+
+Si l'API n'est pas suffisamment documentée dans le projet, identifie clairement ce qui manque et construis une abstraction permettant de compléter facilement la configuration.
+
+Créer si nécessaire :
+
+DynatraceProblemPort
+
+puis :
+
+DynatraceApiAdapter
+
+Le métier ne doit pas dépendre directement du client HTTP Dynatrace.
+
+============================================================
+30. ARCHITECTURE À RESPECTER
+============================================================
+
+Privilégie :
+
+Domain
+Application
+Infrastructure
+Adapters
+Ports
+
+Exemple :
+
+Business logic
+      ↓
+Port
+      ↓
+Adapter
+      ↓
+Infrastructure externe
+
+Même principe pour :
+
+- Kafka ;
+- Email ;
+- Dynatrace ;
+- VoIP ;
+- ElevenLabs.
+
+Ne mélange pas la logique métier avec les appels HTTP externes.
+
+============================================================
+31. OBSERVABILITÉ
+============================================================
+
+Ajoute des logs utiles.
+
+Exemples :
+
+alertId
+problemId
+notificationId
+ruleId
+routingDecisionId
+correlationId
+
+Les logs doivent permettre de comprendre :
+
+"Pourquoi cette alerte a-t-elle été envoyée à cette personne avec ce canal ?"
+
+Évite les logs inutiles et les logs contenant des secrets.
+
+============================================================
+32. GESTION DES ERREURS
+============================================================
+
+Chaque intégration externe peut échouer.
+
+Prévoir :
+
+Dynatrace indisponible
+LLM indisponible
+ElevenLabs indisponible
+Kafka indisponible
+Mail indisponible
+VoIP indisponible
+
+Le système ne doit pas planter globalement parce qu'un service externe est temporairement indisponible.
+
+Utilise selon le besoin :
+
+- retry ;
+- timeout ;
+- fallback ;
+- état FAILED ;
+- escalade ;
+- logs ;
+- audit.
+
+Ne mets pas de retry infini.
+
+============================================================
+33. MIGRATIONS
+============================================================
+
+Après modification du modèle :
+
+- créer migration Flyway ;
+- démarrer PostgreSQL ;
+- exécuter migrations ;
+- vérifier les tables ;
+- vérifier les FK ;
+- vérifier les données par défaut ;
+- vérifier les règles DEFAULT ;
+- vérifier les politiques DEFAULT.
+
+============================================================
+34. DONNÉES DEFAULT
+============================================================
+
+Le système doit démarrer avec un comportement minimal fonctionnel.
+
+Vérifie les données par défaut :
+
+- règles métier DEFAULT ;
+- politiques de routage DEFAULT ;
+- unités organisationnelles de test ;
+- membres de test ;
+- canaux ;
+- paramètres d'escalade.
+
+Ces données doivent être cohérentes avec le comportement du moteur.
+
+============================================================
+35. MODE D'EXÉCUTION
+============================================================
+
+Ne te contente PAS de compiler.
+
+Tu dois réellement :
+
+1. compiler ;
+2. lancer les tests ;
+3. lancer Docker Compose ;
+4. vérifier PostgreSQL ;
+5. vérifier Kafka ;
+6. vérifier Kafka UI ;
+7. vérifier Mail ;
+8. vérifier VoIP ;
+9. lancer Spring Boot ;
+10. vérifier les endpoints ;
+11. vérifier le frontend ;
+12. effectuer un scénario complet.
+
+============================================================
+36. SCÉNARIO DE TEST FINAL OBLIGATOIRE
+============================================================
+
+Construis et exécute un scénario réel :
+
+1. Envoyer une alerte Dynatrace de test.
+2. Vérifier sa réception.
+3. Vérifier sa persistance.
+4. Vérifier sa classification.
+5. Vérifier la décision métier.
+6. Vérifier la règle déclenchée.
+7. Vérifier la décision de routage.
+8. Vérifier le destinataire.
+9. Vérifier le canal.
+10. Si EMAIL :
+  vérifier l'envoi vers le service Mail.
+11. Si SMS :
+  vérifier le JSON envoyé dans Kafka.
+12. Si VOIP :
+  vérifier l'appel via l'infrastructure VoIP locale.
+13. Vérifier l'escalade si nécessaire.
+14. Vérifier la consultation du statut Dynatrace.
+15. Simuler/observer la résolution.
+16. Vérifier l'arrêt de l'escalade.
+17. Vérifier l'audit.
+18. Vérifier l'affichage frontend.
+
+============================================================
+37. SI QUELQUE CHOSE EST MAL CONÇU
+============================================================
+
+Tu as explicitement le droit de modifier la conception.
+
+Exemple :
+
+Si tu découvres que :
+
+RoutingEngine
+    ↓
+NotificationService
+    ↓
+DB
+
+ne permet pas de gérer correctement l'escalade,
+
+tu peux modifier cette conception.
+
+Si une table est insuffisante, modifie-la.
+
+Si une classe mélange trop de responsabilités, refactorise-la.
+
+Si un port est mal placé, déplace-le.
+
+Si un événement est inutile, supprime-le.
+
+Si un événement est nécessaire, ajoute-le.
+
+Si un endpoint manque, ajoute-le.
+
+Mais évite les refactorings cosmétiques.
+
+Chaque changement doit servir à rendre le système fonctionnel, maintenable et cohérent.
+
+============================================================
+38. PRIORITÉS
+============================================================
+
+Travaille dans cet ordre :
+
+## PRIORITÉ 1
+
+Business Rules Engine
 Routing Engine
-Default Rules
-Configured Rules
-Rule precedence
-Fallback
-LLM integration
-Person resolution
-Persistence
-```
+Configuration réelle BDD → moteur
 
----
+## PRIORITÉ 2
 
-# 43. TRÈS IMPORTANT — AVANT DE CODER
+Notification workflow
+Email
+Kafka SMS
 
-Ne commence pas immédiatement par créer des fichiers.
+## PRIORITÉ 3
 
-Commence par analyser :
+Resolution Monitoring Dynatrace
+Escalade
+Suivi asynchrone
 
-```text
-1. architecture Spring Boot actuelle
-2. module classification
-3. module alert
-4. module business rules existant
-5. module routing existant
-6. notification
-7. repositories
-8. entities
-9. schema.sql
-10. prototype.jsx
-```
+## PRIORITÉ 4
 
-Ensuite identifie :
+VoIP Docker + SIP/WebRTC
+ElevenLabs TTS
 
-```text
-- ce qui existe déjà ;
-- ce qui est incomplet ;
-- ce qui est contradictoire ;
-- ce qui doit être réutilisé ;
-- ce qui doit être modifié ;
+## PRIORITÉ 5
+
+Audit / historique / journalisation
+
+## PRIORITÉ 6
+
+APIs nécessaires au frontend
+
+## PRIORITÉ 7
+
+Frontend React
+Dashboard
+Alertes
+Historique
+Superviseur
+Statistiques
+
+## PRIORITÉ 8
+
+Tests d'intégration
+Docker
+Scénario complet
+
+============================================================
+39. IMPORTANT : NE PAS S'ARRÊTER À LA PREMIÈRE ERREUR
+============================================================
+
+Si tu rencontres une erreur :
+
+1. analyse la cause ;
+2. corrige ;
+3. relance ;
+4. continue.
+
+Ne me demande pas de résoudre manuellement une erreur qui peut être résolue raisonnablement en inspectant le projet.
+
+Tu peux prendre des décisions techniques.
+
+Si une information manque réellement et qu'elle est impossible à déduire du projet, indique précisément :
+
 - ce qui manque ;
-- les impacts BDD ;
-- les impacts frontend ;
-- les impacts métier.
-```
+- où cela manque ;
+- pourquoi c'est nécessaire ;
+- quelle valeur/configuration est attendue.
 
-Puis implémente.
+============================================================
+40. CRITÈRE FINAL DE RÉUSSITE
+============================================================
 
-**Ne recrée pas ce qui existe déjà.**
+Je ne veux pas seulement :
 
-**Ne crée pas une architecture parallèle.**
+"le projet compile".
 
-Réutilise au maximum les composants existants lorsqu'ils correspondent au besoin.
+Je veux :
 
----
+- backend compilable ;
+- tests OK ;
+- BDD cohérente ;
+- migrations OK ;
+- règles métier réellement exécutables ;
+- règles configurées réellement utilisées ;
+- routage réellement exécuté ;
+- email fonctionnel ;
+- Kafka SMS fonctionnel ;
+- JSON SMS correct ;
+- vérification Dynatrace fonctionnelle ;
+- escalade fonctionnelle ;
+- VoIP locale fonctionnelle ;
+- TTS ElevenLabs intégré ;
+- audit fonctionnel ;
+- APIs disponibles ;
+- frontend connecté ;
+- dashboard utile ;
+- alertes consultables ;
+- historique consultable ;
+- fonctionnalités superviseur cohérentes ;
+- Docker fonctionnel ;
+- scénario complet démontrable.
 
-# 44. RÈGLE DE CONCEPTION FINALE
+============================================================
+41. RAPPORT FINAL DE TON TRAVAIL
+============================================================
 
-Le résultat doit respecter cette séparation :
+À la fin, donne-moi un résumé structuré :
 
-```text
-                    ┌──────────────────────┐
-                    │       LLM            │
-                    │ Classification only  │
-                    └──────────┬───────────┘
-                               │
-                               ▼
-                    ┌──────────────────────┐
-                    │ BUSINESS RULE ENGINE │
-                    │                      │
-                    │ Default rules        │
-                    │ Configured rules     │
-                    │ Conditions           │
-                    │ Exceptions           │
-                    │ Business actions     │
-                    └──────────┬───────────┘
-                               │
-                               ▼
-                    ┌──────────────────────┐
-                    │    ROUTING ENGINE    │
-                    │                      │
-                    │ Default policy       │
-                    │ Configured policy    │
-                    │ Person resolution    │
-                    │ Steps                │
-                    │ Delays               │
-                    │ Escalation           │
-                    └──────────┬───────────┘
-                               │
-                               ▼
-                    ┌──────────────────────┐
-                    │ NOTIFICATION ENGINE  │
-                    │ Voice / SMS / Email  │
-                    └──────────────────────┘
-```
+A. Ce qui existait déjà
+B. Ce que tu as ajouté
+C. Ce que tu as modifié
+D. Ce que tu as supprimé
+E. Les changements BDD
+F. Les nouveaux endpoints
+G. Les nouveaux services
+H. Les nouveaux ports/adapters
+I. Les nouveaux conteneurs Docker
+J. Les configurations nécessaires
+K. Les tests exécutés
+L. Résultat des tests
+M. Scénario de démonstration
+N. Ce qui reste éventuellement impossible à tester localement
+O. Commandes exactes pour démarrer tout le projet
 
-La règle la plus importante est :
+Pour chaque problème restant, ne dis pas simplement "à faire".
 
-> **Le LLM produit une analyse. Le Business Rule Engine transforme cette analyse en décision métier. Le Routing Engine transforme cette décision en stratégie d'action et de destinataires. Le Notification Engine exécute concrètement la communication.**
+Explique précisément pourquoi il reste et quelle est la prochaine action.
 
-Les règles par défaut représentent le **chemin normal de fonctionnement**.
+============================================================
+42. Gestion Git et commits intermédiaires
+============================================================
 
-Les règles configurées par les Ops représentent des **branches alternatives conditionnelles** capables de modifier le comportement normal lorsqu'elles correspondent.
+Pendant toute l'implémentation, utilise Git de manière propre et structurée.
 
-Le système doit rester déterministe, traçable, configurable et extensible.
+Commits obligatoires
 
----
+Ne fais pas un seul énorme commit à la fin. Crée un commit après chaque partie fonctionnelle importante et stable.
 
-### Instruction finale à Cursor
+Exemples de commits attendus :
 
-**Ne considère pas cette demande comme une simple tâche CRUD.**
+feat(rules): complete business rules evaluation
+feat(routing): complete routing and escalation engine
+feat(notification): implement email notification workflow
+feat(sms): implement Kafka SMS producer
+feat(voip): implement local VoIP simulation
+feat(audit): implement audit logging
+feat(alert): complete alert history and lifecycle
+feat(dashboard): implement supervisor and ops dashboards
+feat(frontend): integrate React frontend with backend
+test: complete backend integration tests
 
-Il s'agit de l'implémentation du **cœur décisionnel de l'application**.
+Les noms exacts peuvent être adaptés à ce qui est réellement implémenté.
 
-Si, pendant l'analyse, tu constates que le modèle actuel ne permet pas proprement de réaliser cette architecture, **arrête-toi sur le point concerné, explique le problème et propose une modification concrète**, puis applique-la si elle est nécessaire à une implémentation cohérente.
+Règles importantes pour les commits
+Ne committe que du code qui compile et fonctionne autant que possible.
+Avant chaque commit important :
+vérifier que le projet compile ;
+exécuter les tests pertinents ;
+vérifier les migrations Flyway ;
+vérifier que Docker Compose démarre correctement si la modification concerne l'infrastructure ;
+vérifier qu'aucune fonctionnalité précédente n'a été cassée.
+Ne jamais faire de commit contenant volontairement du code cassé simplement pour sauvegarder l'état.
+Ne pas utiliser git reset --hard, git clean -fd ou toute autre commande destructive sans mon autorisation explicite.
+Ne pas supprimer ou écraser une fonctionnalité existante simplement parce qu'elle est plus facile à remplacer.
+Avant une modification architecturale importante, examiner d'abord le code existant et expliquer brièvement pourquoi cette modification est nécessaire.
+Après chaque commit important, indique clairement :
+le commit créé ;
+les fichiers/modules principaux modifiés ;
+ce qui fonctionne maintenant ;
+les tests exécutés ;
+les éventuels problèmes restant à traiter.
 
-Ne privilégie pas la conservation artificielle du code actuel au détriment de la cohérence du système.
+Stratégie recommandée
 
-L'objectif final est d'obtenir un système réellement exécutable de bout en bout, où la configuration réalisée par un Ops n'est pas simplement affichée dans l'interface mais **change effectivement le comportement du moteur Java et est persistée dans PostgreSQL**.
+Travaille par blocs fonctionnels cohérents, par exemple :
+
+Analyse → implémentation → tests → validation → commit
+
+puis passer au bloc suivant.
+
+À la fin, fournir un résumé Git indiquant les commits créés dans l'ordre et ce que chacun représente.
+
+# ============================================================
+
+RÈGLE FINALE
+
+Tu dois agir comme un ingénieur responsable de livrer une version fonctionnelle d'AlertOps.
+
+Tu n'es PAS obligé de suivre aveuglément l'ancienne architecture.
+
+Tu dois respecter :
+
+- le domaine métier ;
+- les responsabilités des modules ;
+- les contraintes de l'entreprise ;
+- les données réelles ;
+- les interfaces externes ;
+- la sécurité ;
+- la cohérence BDD ;
+- la maintenabilité.
+
+Si une meilleure conception est nécessaire, adopte-la.
+
+Mais ne transforme pas le projet en une architecture inutilement complexe.
+
+PRIVILÉGIE :
+Simplicité + cohérence + testabilité + fonctionnement réel.
+
+COMMENCE MAINTENANT PAR L'ANALYSE COMPLÈTE DU PROJET AVANT DE MODIFIER LE CODE.

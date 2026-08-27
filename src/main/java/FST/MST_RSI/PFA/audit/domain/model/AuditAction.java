@@ -13,6 +13,15 @@ public final class AuditAction {
     public static final String RESOLUTION_CHECK_SCHEDULED = "RESOLUTION_CHECK_SCHEDULED";
     public static final String RESOLUTION_CHECK_COMPLETED = "RESOLUTION_CHECK_COMPLETED";
     public static final String PIPELINE_COMPLETED = "PIPELINE_COMPLETED";
+    public static final String MANUAL_CALL = "MANUAL_CALL";
+    public static final String VOICE_CALL_REQUESTED = "VOICE_CALL_REQUESTED";
+    public static final String VOICE_CALL_RINGING = "VOICE_CALL_RINGING";
+    public static final String VOICE_CALL_ANSWERED = "VOICE_CALL_ANSWERED";
+    public static final String VOICE_CALL_REJECTED = "VOICE_CALL_REJECTED";
+    public static final String VOICE_CALL_BUSY = "VOICE_CALL_BUSY";
+    public static final String VOICE_CALL_NO_ANSWER = "VOICE_CALL_NO_ANSWER";
+    public static final String VOICE_CALL_HANGUP = "VOICE_CALL_HANGUP";
+    public static final String VOICE_CALL_FAILED = "VOICE_CALL_FAILED";
 
     private AuditAction() {
     }

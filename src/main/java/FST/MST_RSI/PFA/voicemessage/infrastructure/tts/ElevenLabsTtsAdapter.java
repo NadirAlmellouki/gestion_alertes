@@ -46,12 +46,12 @@ public class ElevenLabsTtsAdapter implements TextToSpeechPort {
                 .baseUrl(properties.getBaseUrl())
                 .requestFactory(requestFactory)
                 .defaultHeader("xi-api-key", properties.getApiKey())
-                .defaultHeader("Accept", "audio/mpeg")
+                .defaultHeader("Accept", "application/octet-stream")
                 .build();
 
         try {
-            byte[] audio = client.post()
-                    .uri("/v1/text-to-speech/{voiceId}", properties.getVoiceId())
+            byte[] pcm = client.post()
+                    .uri("/v1/text-to-speech/{voiceId}?output_format=pcm_8000", properties.getVoiceId())
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(Map.of(
                             "text", text,
@@ -59,10 +59,10 @@ public class ElevenLabsTtsAdapter implements TextToSpeechPort {
                     ))
                     .retrieve()
                     .body(byte[].class);
-            if (audio == null || audio.length == 0) {
+            if (pcm == null || pcm.length == 0) {
                 return Optional.empty();
             }
-            return Optional.of(new TtsAudio(audio, "audio/mpeg"));
+            return Optional.of(PcmWavTone.fromPcm16le(pcm, 8000));
         } catch (Exception ex) {
             log.warn("ElevenLabs TTS failed: {}", ex.getMessage());
             return Optional.empty();

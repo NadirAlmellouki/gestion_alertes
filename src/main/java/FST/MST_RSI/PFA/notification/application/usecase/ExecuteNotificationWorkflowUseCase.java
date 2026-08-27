@@ -315,7 +315,7 @@ public class ExecuteNotificationWorkflowUseCase {
                 message,
                 audio != null ? audio.content() : null,
                 audio != null ? audio.contentType() : null,
-                alert.getId().value().toString()
+                notification.id().toString()
         );
 
         NotificationDeliveryResult deliveryResult = voiceCallPort.call(callRequest);

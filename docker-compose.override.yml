@@ -40,3 +40,30 @@ services:
       - "${KEYCLOAK_PORT:-8083}:8080"
     volumes:
       - ./docker/keycloak/realm-alertops.json:/opt/keycloak/data/import/realm-alertops.json:ro
+
+  asterisk:
+    build: ./docker/asterisk
+    image: alertops-asterisk:22
+    container_name: alertops-asterisk
+    environment:
+      ASTERISK_TERMINAL_OPTS: "-n"
+    ports:
+      - "${ASTERISK_HTTP_PORT:-8088}:8088"
+      - "${ASTERISK_TLS_PORT:-8089}:8089"
+      - "${ASTERISK_SIP_PORT:-5060}:5060/udp"
+      - "${ASTERISK_SIP_TCP_PORT:-5060}:5060/tcp"
+      - "10000-10100:10000-10100/udp"
+    volumes:
+      - ./docker/asterisk/config/http.conf:/etc/asterisk/http.conf:ro
+      - ./docker/asterisk/config/ari.conf:/etc/asterisk/ari.conf:ro
+      - ./docker/asterisk/config/pjsip.conf:/etc/asterisk/pjsip.conf:ro
+      - ./docker/asterisk/config/rtp.conf:/etc/asterisk/rtp.conf:ro
+      - ./docker/asterisk/config/extensions.conf:/etc/asterisk/extensions.conf:ro
+      - ./docker/asterisk/config/logger.conf:/etc/asterisk/logger.conf:ro
+      - ./docker/asterisk/sounds:/var/lib/asterisk/sounds/alertops
+      - ./docker/asterisk/sounds/recordings:/var/spool/asterisk/recording
+      - asterisk-keys:/etc/asterisk/keys
+    restart: unless-stopped
+
+volumes:
+  asterisk-keys:

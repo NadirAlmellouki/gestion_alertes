@@ -1,0 +1,239 @@
+Corrige les deux problèmes actuellement observés sur les appels VoIP manuels du superviseur dans AlertOps.
+
+## 1. CRASH DU FRONTEND LORSQUE L'OPS RÉPOND
+
+Scénario actuel :
+
+1. Le superviseur ouvre l'application dans le navigateur.
+2. Il déclenche un appel manuel vers un OPS.
+3. Le navigateur et MicroSIP sonnent correctement.
+4. L'OPS clique sur "Répondre" dans MicroSIP.
+5. L'appel semble être accepté côté SIP/Asterisk.
+6. À cet instant, l'application web du superviseur devient complètement blanche.
+7. La console du navigateur contient une erreur JavaScript/React comme le suivant {Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+ManualCallModal.jsx:258 Uncaught ReferenceError: muted is not defined
+    at ManualCallModal (ManualCallModal.jsx:258:27
+    at Object.react_stack_bottom_frame (react-dom-client.development.js:25904:20)
+    at renderWithHooks (react-dom-client.development.js:7662:22)
+    at updateFunctionComponent (react-dom-client.development.js:10166:19)
+    at beginWork (react-dom-client.development.js:11778:18)
+    at runWithFiberInDEV (react-dom-client.development.js:871:30)
+    at performUnitOfWork (react-dom-client.development.js:17641:22)
+    at workLoopSync (react-dom-client.development.js:17469:41)
+    at renderRootSync (react-dom-client.development.js:17450:11)
+    at performWorkOnRoot (react-dom-client.development.js:16583:35)
+(anonymous) @ ManualCallModal.jsx:258
+react_stack_bottom_frame @ react-dom-client.development.js:25904
+renderWithHooks @ react-dom-client.development.js:7662
+updateFunctionComponent @ react-dom-client.development.js:10166
+beginWork @ react-dom-client.development.js:11778
+runWithFiberInDEV @ react-dom-client.development.js:871
+performUnitOfWork @ react-dom-client.development.js:17641
+workLoopSync @ react-dom-client.development.js:17469
+renderRootSync @ react-dom-client.development.js:17450
+performWorkOnRoot @ react-dom-client.development.js:16583
+performWorkOnRootViaSchedulerTask @ react-dom-client.development.js:18957
+performWorkUntilDeadline @ scheduler.development.js:45
+<ManualCallModal>
+(anonymous) @ react-jsx-dev-runtime.development.js:335
+(anonymous) @ RecipientsPage.jsx:142
+react_stack_bottom_frame @ react-dom-client.development.js:25904
+renderWithHooksAgain @ react-dom-client.development.js:7762
+renderWithHooks @ react-dom-client.development.js:7674
+updateFunctionComponent @ react-dom-client.development.js:10166
+beginWork @ react-dom-client.development.js:11778
+runWithFiberInDEV @ react-dom-client.development.js:871
+performUnitOfWork @ react-dom-client.development.js:17641
+workLoopSync @ react-dom-client.development.js:17469
+renderRootSync @ react-dom-client.development.js:17450
+performWorkOnRoot @ react-dom-client.development.js:16504
+performSyncWorkOnRoot @ react-dom-client.development.js:18972
+flushSyncWorkAcrossRoots_impl @ react-dom-client.development.js:18814
+processRootScheduleInMicrotask @ react-dom-client.development.js:18853
+anonymousCallbackTo: scheduleMicrotask @ react-dom-client.development.js:18991
+client:529 An error occurred in the <ManualCallModal> component.
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://react.dev/link/error-boundaries to learn more about error boundaries.
+
+(anonymous) @ client:529
+defaultOnUncaughtError @ react-dom-client.development.js:9362
+logUncaughtError @ react-dom-client.development.js:9431
+runWithFiberInDEV @ react-dom-client.development.js:871
+lane.callback @ react-dom-client.development.js:9461
+callCallback @ react-dom-client.development.js:7423
+commitCallbacks @ react-dom-client.development.js:7443
+runWithFiberInDEV @ react-dom-client.development.js:874
+commitLayoutEffectOnFiber @ react-dom-client.development.js:14047
+flushLayoutEffects @ react-dom-client.development.js:18138
+commitRoot @ react-dom-client.development.js:17954
+commitRootWhenReady @ react-dom-client.development.js:16824
+performWorkOnRoot @ react-dom-client.development.js:16722
+performWorkOnRootViaSchedulerTask @ react-dom-client.development.js:18957
+performWorkUntilDeadline @ scheduler.development.js:45
+<ManualCallModal>
+(anonymous) @ react-jsx-dev-runtime.development.js:335
+(anonymous) @ RecipientsPage.jsx:142
+react_stack_bottom_frame @ react-dom-client.development.js:25904
+renderWithHooksAgain @ react-dom-client.development.js:7762
+renderWithHooks @ react-dom-client.development.js:7674
+updateFunctionComponent @ react-dom-client.development.js:10166
+beginWork @ react-dom-client.development.js:11778
+runWithFiberInDEV @ react-dom-client.development.js:871
+performUnitOfWork @ react-dom-client.development.js:17641
+workLoopSync @ react-dom-client.development.js:17469
+renderRootSync @ react-dom-client.development.js:17450
+performWorkOnRoot @ react-dom-client.development.js:16504
+performSyncWorkOnRoot @ react-dom-client.development.js:18972
+flushSyncWorkAcrossRoots_impl @ react-dom-client.development.js:18814
+processRootScheduleInMicrotask @ react-dom-client.development.js:18853
+anonymousCallbackTo: scheduleMicrotask @ react-dom-client.development.js:18991
+[NEW] Explain Console errors by using Copilot in Edge: click  to explain an error. Learn moreDon't show again}.
+
+Analyse précisément cette erreur et trouve sa vraie cause.
+
+Vérifie notamment :
+- PhoneContext / SIP.js / SimpleUser ;
+- les callbacks `onCallAnswered`, `onCallHangup`, etc. ;
+- la gestion du MediaStream et du `<audio>` ;
+- les références `useRef` ;
+- les changements d'état React au moment où l'appel devient `established` ;
+- les exceptions non gérées qui peuvent provoquer le rendu blanc ;
+- les données reçues depuis le backend ou Asterisk au moment de l'établissement du bridge.
+
+Ne masque pas simplement l'erreur avec un `try/catch`.
+Corrige la cause réelle.
+
+Le résultat attendu est :
+
+Superviseur navigateur
+→ appel manuel
+→ OPS répond sur MicroSIP
+→ frontend reste fonctionnel
+→ état de l'appel passe correctement à `established`
+→ microphone du navigateur actif
+→ audio OPS → navigateur
+→ audio navigateur → OPS
+→ interface affiche l'appel en cours.
+
+## 2. ENREGISTREMENT MANUEL : FAUCUN ENREGISTREMENT
+
+Le problème précédent concernant l'absence de fichier encore n'est pas corrigé :
+
+Il faut donc vérifier toute la chaîne audio.
+
+Analyse :
+
+Asterisk
+→ channels
+→ bridge
+→ flux RTP/audio
+→ MixMonitor / Record
+→ fichier WAV
+→ volume Docker
+→ dossier recording du backend.
+etc..
+
+Vérifie particulièrement :
+
+- à quel moment l'enregistrement est démarré ;
+- si l'enregistrement est attaché au bon channel ou au bridge ;
+- si le bridge contient réellement les deux channels ;
+- si le média audio circule réellement entre les deux participants ;
+- si MixMonitor reçoit effectivement de l'audio ;
+- si l'enregistrement est arrêté correctement après le hangup ;
+- si le fichier est fermé/finalisé correctement ;
+- les permissions du répertoire ;
+- le montage du volume Docker ;
+- le format WAV utilisé ;
+- la configuration RTP/codec ;
+- les logs Asterisk pendant l'appel.
+
+IMPORTANT :
+Ne considère PAS qu'un fichier créé signifie que l'enregistrement fonctionne.
+
+Je veux un test réel où :
+- le superviseur parle ;
+- l'OPS répond ;
+- les deux parlent réellement pendant plusieurs secondes ;
+- le superviseur raccroche ;
+- le fichier final est généré ;
+- sa taille est supérieure à 50 octets ;
+- le fichier contient réellement la conversation audio.
+
+Vérifie également que l'enregistrement contient bien les deux directions audio (superviseur → OPS et OPS → superviseur), et pas seulement une direction.
+
+## 3. VÉRIFIER LE FLUX AUDIO WEBRTC
+
+Comme le superviseur doit parler depuis le navigateur, vérifie que :
+
+Browser microphone
+→ WebRTC/SIP.js
+→ WSS
+→ Asterisk/PJSIP
+→ bridge
+→ MicroSIP
+
+et dans l'autre sens :
+
+MicroSIP
+→ RTP
+→ Asterisk
+→ WebRTC
+→ navigateur.
+
+Il faut confirmer que les deux flux audio existent réellement.
+
+Si nécessaire, utilise les outils CLI Asterisk et les logs pour vérifier les channels, le bridge, les codecs et le RTP.
+
+## 4. NE PAS FAIRE UNE SIMULATION
+
+Je ne veux aucune correction purement visuelle.
+
+Le système doit fonctionner réellement avec :
+
+- navigateur superviseur ;
+- microphone réel ;
+- SIP.js/WebRTC ;
+- Asterisk ;
+- MicroSIP ;
+- bridge audio bidirectionnel ;
+- enregistrement audio réel.
+
+## 5. TEST FINAL OBLIGATOIRE
+
+Après correction, réalise ou vérifie ce scénario complet :
+
+1. SUPERVISEUR se connecte au téléphone VoIP depuis le navigateur.
+2. Le navigateur obtient l'autorisation microphone.
+3. SUPERVISEUR déclenche un appel manuel.
+4. MicroSIP OPS sonne.
+5. OPS répond.
+6. Le navigateur ne plante pas.
+7. Le bridge audio est établi.
+8. SUPERVISEUR parle depuis le navigateur.
+9. OPS répond depuis MicroSIP.
+10. Les deux entendent réellement leur interlocuteur.
+11. L'appel est enregistré.
+12. SUPERVISEUR raccroche.
+13. OPS est également déconnecté.
+14. L'enregistrement est finalisé.
+15. Le fichier n'est pas vide.
+16. Vérifier sa taille et, si possible, sa durée.
+17. Vérifier que l'enregistrement contient réellement de l'audio.
+18. Vérifier que la session VoIP est correctement clôturée en base.
+
+Si un test échoue, continue l'analyse jusqu'à identifier la cause réelle au lieu de considérer le bloc comme terminé.
+
+À la fin, donne-moi clairement :
+
+- la cause exacte du crash frontend ;
+- la correction appliquée ;
+- la cause exacte des fichiers 0 octet ;
+- la correction appliquée pour l'enregistrement ;
+- les fichiers modifiés ;
+- les tests réellement effectués ;
+- la taille et la durée d'un fichier d'enregistrement valide ;
+- l'état final du scénario complet.
+
+Ne modifie pas inutilement les autres fonctionnalités du projet.
