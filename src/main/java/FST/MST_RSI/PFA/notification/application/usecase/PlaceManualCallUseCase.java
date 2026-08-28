@@ -24,6 +24,8 @@ import FST.MST_RSI.PFA.notification.infrastructure.persistence.VoiceCallSessionE
 import FST.MST_RSI.PFA.notification.infrastructure.persistence.VoiceCallSessionJpaRepository;
 import FST.MST_RSI.PFA.notification.infrastructure.voip.asterisk.AsteriskAriClient;
 import FST.MST_RSI.PFA.notification.infrastructure.voip.asterisk.AsteriskAriEventListener;
+import FST.MST_RSI.PFA.notification.application.service.LiveManualCallTracker;
+import FST.MST_RSI.PFA.notification.application.dto.VoiceCallSessionStatusDto;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -54,6 +56,7 @@ public class PlaceManualCallUseCase {
     // Optional — only present when Asterisk adapter is active
     private final ObjectProvider<AsteriskAriClient> ariClientProvider;
     private final ObjectProvider<AsteriskAriEventListener> ariListenerProvider;
+    private final LiveManualCallTracker liveManualCallTracker;
 
     public PlaceManualCallUseCase(
             PersonRepository personRepository,
@@ -64,7 +67,8 @@ public class PlaceManualCallUseCase {
             AuditRecorder auditRecorder,
             VoiceCallSessionJpaRepository sessionRepository,
             ObjectProvider<AsteriskAriClient> ariClientProvider,
-            ObjectProvider<AsteriskAriEventListener> ariListenerProvider
+            ObjectProvider<AsteriskAriEventListener> ariListenerProvider,
+            LiveManualCallTracker liveManualCallTracker
     ) {
         this.personRepository = personRepository;
         this.alertRepositoryPort = alertRepositoryPort;
@@ -75,6 +79,7 @@ public class PlaceManualCallUseCase {
         this.sessionRepository = sessionRepository;
         this.ariClientProvider = ariClientProvider;
         this.ariListenerProvider = ariListenerProvider;
+        this.liveManualCallTracker = liveManualCallTracker;
     }
 
     @Transactional
@@ -110,12 +115,17 @@ public class PlaceManualCallUseCase {
         boolean liveMode = voipNotificationProperties.isEnabled() && supervisorExt != null;
 
         NotificationDeliveryResult delivery;
-        String sessionId = UUID.randomUUID().toString();
+        UUID voiceSessionId = null;
+        String supervisorChannelId = null;
+        String adminChannelId = null;
 
         if (liveMode) {
-            delivery = placeBridgedCall(person, supervisorExt, notificationId, alertId, sessionId);
+            BridgedCallResult bridged = placeBridgedCall(person, supervisorExt, notificationId, alertId);
+            delivery = bridged.delivery();
+            voiceSessionId = bridged.sessionId();
+            supervisorChannelId = bridged.supervisorChannelId();
+            adminChannelId = bridged.adminChannelId();
         } else {
-            // Fallback: TTS-only call (no supervisor bridge)
             VoiceCallRequest callRequest = buildTtsCallRequest(person, notificationId, alertId);
             delivery = placeCall(callRequest);
         }
@@ -152,53 +162,70 @@ public class PlaceManualCallUseCase {
                 detail,
                 notificationId,
                 alertId,
-                true
+                liveMode,
+                voiceSessionId,
+                supervisorChannelId,
+                adminChannelId
         );
     }
 
     // ─── Bridge mode: originate supervisor channel + admin channel, then bridge ───
 
-    private NotificationDeliveryResult placeBridgedCall(
+    private BridgedCallResult placeBridgedCall(
             PersonEntity person,
             String supervisorExt,
             UUID notificationId,
-            UUID alertId,
-            String sessionId
+            UUID alertId
     ) {
         AsteriskAriClient ariClient = ariClientProvider.getIfAvailable();
         AsteriskAriEventListener ariListener = ariListenerProvider.getIfAvailable();
         if (ariClient == null || ariListener == null) {
             log.warn("[VOICE] Asterisk ARI not available for bridged call — falling back to TTS");
-            return placeCall(buildTtsCallRequest(person, notificationId, alertId));
+            return new BridgedCallResult(placeCall(buildTtsCallRequest(person, notificationId, alertId)), null, null, null);
         }
 
         try {
+            UUID sessionUuid = UUID.randomUUID();
+            String sessionId = sessionUuid.toString();
             String supervisorChannelId = AsteriskAriClient.newChannelId();
             String adminChannelId = AsteriskAriClient.newChannelId();
             String commonArgs = "live=true,session=" + sessionId
                     + (notificationId != null ? ",notification=" + notificationId : "");
 
-            // Register bridge session BEFORE originating so StasisStart is handled correctly
             ariListener.registerBridgeSession(sessionId, supervisorChannelId, adminChannelId);
 
             String adminExtension = FST.MST_RSI.PFA.notification.domain.service.SipEndpointMapper
                     .extensionFromPhone(person.getPhone());
 
-            // Persist voice call session in DB so events and duration are tracked
             VoiceCallSessionEntity session = new VoiceCallSessionEntity();
-            session.setId(UUID.randomUUID());
+            session.setId(sessionUuid);
             session.setNotificationId(notificationId);
             session.setAlertId(alertId);
             session.setPersonId(person.getId());
             session.setExtension(adminExtension);
             session.setProviderCallId(adminChannelId);
+            session.setSupervisorChannelId(supervisorChannelId);
+            session.setSupervisorExtension(supervisorExt);
+            session.setRecordingName("manual-" + sessionId);
             session.setSoundName("manual-" + sessionId);
             session.setOutcome("INITIATED");
             session.setStartedAt(Instant.now());
             session.setLiveConversation(true);
             sessionRepository.save(session);
 
-            // 1. Call the supervisor's WebRTC phone (rings their browser)
+            liveManualCallTracker.started(LiveManualCallTracker.snapshot(
+                    sessionUuid,
+                    "INITIATED",
+                    true,
+                    supervisorChannelId,
+                    adminChannelId,
+                    supervisorExt,
+                    session.getStartedAt(),
+                    null,
+                    null,
+                    null
+            ));
+
             ariClient.originate(
                     "PJSIP/" + supervisorExt,
                     commonArgs + ",role=supervisor",
@@ -207,7 +234,6 @@ public class PlaceManualCallUseCase {
             );
             log.info("[VOICE] Supervisor channel originated ext={} channelId={}", supervisorExt, supervisorChannelId);
 
-            // 2. Call the admin's SIP phone
             ariClient.originate(
                     FST.MST_RSI.PFA.notification.domain.service.SipEndpointMapper.pjsipEndpoint(adminExtension),
                     commonArgs + ",role=admin",
@@ -216,24 +242,87 @@ public class PlaceManualCallUseCase {
             );
             log.info("[VOICE] Admin channel originated ext={} channelId={}", adminExtension, adminChannelId);
 
-            // Return the admin's channelId as the primary call identifier
-            return NotificationDeliveryResult.sent(adminChannelId);
+            return new BridgedCallResult(
+                    NotificationDeliveryResult.sent(adminChannelId),
+                    sessionUuid,
+                    supervisorChannelId,
+                    adminChannelId
+            );
         } catch (Exception ex) {
             String msg = ex.getMessage() != null ? ex.getMessage() : "Unknown error";
             if (msg.contains("Allocation failed")) {
                 msg = "Impossible de joindre l'extension superviseur (" + supervisorExt + ") : votre téléphone VoIP n'est pas connecté. Veuillez vous connecter sur la page Téléphone VoIP.";
             }
             log.warn("[VOICE] Bridged call failed: {}", msg);
-            return NotificationDeliveryResult.failed(msg);
+            return new BridgedCallResult(NotificationDeliveryResult.failed(msg), null, null, null);
         }
     }
 
     public void hangup(String channelId) {
+        hangup(null, channelId);
+    }
+
+    public void hangup(UUID sessionId, String channelId) {
+        AsteriskAriEventListener ariListener = ariListenerProvider.getIfAvailable();
         AsteriskAriClient ariClient = ariClientProvider.getIfAvailable();
+
+        VoiceCallSessionEntity session = null;
+        if (sessionId != null) {
+            session = sessionRepository.findById(sessionId).orElse(null);
+        }
+        if (session == null && channelId != null && !channelId.isBlank()) {
+            session = sessionRepository.findByAnyChannelId(channelId).orElse(null);
+        }
+
+        if (session != null && ariListener != null) {
+            ariListener.terminateSession(session.getId().toString());
+            log.info("[VOICE] Explicit hangup for session={}", session.getId());
+            return;
+        }
+        if (ariListener != null && channelId != null && !channelId.isBlank()) {
+            ariListener.terminateByChannel(channelId);
+            log.info("[VOICE] Explicit hangup for channelId={}", channelId);
+            return;
+        }
+        if (ariClient != null && session != null) {
+            if (session.getRecordingName() != null) {
+                ariClient.stopRecording(session.getRecordingName());
+            }
+            if (session.getBridgeId() != null) {
+                ariClient.destroyBridge(session.getBridgeId());
+            }
+            ariClient.hangup(session.getSupervisorChannelId());
+            ariClient.hangup(session.getProviderCallId());
+            return;
+        }
         if (ariClient != null && channelId != null && !channelId.isBlank()) {
             ariClient.hangup(channelId);
-            log.info("[VOICE] Explicit manual hangup requested for channelId={}", channelId);
         }
+    }
+
+    public VoiceCallSessionStatusDto status(UUID sessionId) {
+        VoiceCallSessionEntity session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new ResourceNotFoundException("Voice call session not found: " + sessionId));
+        return LiveManualCallTracker.snapshot(
+                session.getId(),
+                session.getOutcome(),
+                session.getEndedAt() == null,
+                session.getSupervisorChannelId(),
+                session.getProviderCallId(),
+                session.getSupervisorExtension(),
+                session.getStartedAt(),
+                session.getAnsweredAt(),
+                session.getEndedAt(),
+                session.getHangupCause()
+        );
+    }
+
+    private record BridgedCallResult(
+            NotificationDeliveryResult delivery,
+            UUID sessionId,
+            String supervisorChannelId,
+            String adminChannelId
+    ) {
     }
 
     // ─── TTS fallback (no supervisor bridge) ────────────────────────────────────

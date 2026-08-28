@@ -10,6 +10,7 @@ import FST.MST_RSI.PFA.routingengine.domain.model.RoutingDecision;
 import FST.MST_RSI.PFA.routingengine.domain.model.RoutingExecutionStatus;
 import FST.MST_RSI.PFA.routingengine.domain.model.RoutingPolicy;
 import FST.MST_RSI.PFA.routingengine.domain.port.RoutingPolicyRepositoryPort;
+import FST.MST_RSI.PFA.routingengine.domain.service.EscalationConditionEvaluator;
 import FST.MST_RSI.PFA.routingengine.domain.service.RoutingEscalationEngine;
 import FST.MST_RSI.PFA.routingengine.infrastructure.config.RoutingEscalationProperties;
 import FST.MST_RSI.PFA.routingengine.infrastructure.persistence.RoutingExecutionEntity;
@@ -34,6 +35,7 @@ public class ProcessRoutingEscalationUseCase {
     private final RoutingExecutionRepository routingExecutionRepository;
     private final RoutingPolicyRepositoryPort routingPolicyRepositoryPort;
     private final RoutingEscalationEngine routingEscalationEngine;
+    private final EscalationConditionEvaluator escalationConditionEvaluator;
     private final RoutingEscalationContextLoader contextLoader;
     private final ExecuteNotificationWorkflowUseCase executeNotificationWorkflowUseCase;
     private final ScheduleRoutingEscalationUseCase scheduleRoutingEscalationUseCase;
@@ -44,6 +46,7 @@ public class ProcessRoutingEscalationUseCase {
             RoutingExecutionRepository routingExecutionRepository,
             RoutingPolicyRepositoryPort routingPolicyRepositoryPort,
             RoutingEscalationEngine routingEscalationEngine,
+            EscalationConditionEvaluator escalationConditionEvaluator,
             RoutingEscalationContextLoader contextLoader,
             ExecuteNotificationWorkflowUseCase executeNotificationWorkflowUseCase,
             ScheduleRoutingEscalationUseCase scheduleRoutingEscalationUseCase,
@@ -53,6 +56,7 @@ public class ProcessRoutingEscalationUseCase {
         this.routingExecutionRepository = routingExecutionRepository;
         this.routingPolicyRepositoryPort = routingPolicyRepositoryPort;
         this.routingEscalationEngine = routingEscalationEngine;
+        this.escalationConditionEvaluator = escalationConditionEvaluator;
         this.contextLoader = contextLoader;
         this.executeNotificationWorkflowUseCase = executeNotificationWorkflowUseCase;
         this.scheduleRoutingEscalationUseCase = scheduleRoutingEscalationUseCase;
@@ -72,13 +76,34 @@ public class ProcessRoutingEscalationUseCase {
             return;
         }
 
+        RoutingEscalationContextLoader.LoadedEscalationContext loaded = contextLoader.load(execution);
+        Optional<String> stopReason = escalationConditionEvaluator.stopReason(execution.getId(), loaded.alert());
+        if (stopReason.isPresent()) {
+            routingEscalationEngine.complete(execution, stopReason.get());
+            auditRecorder.record(new AuditRecord(
+                    AuditAction.ESCALATION_STOPPED,
+                    execution.getAlertId(),
+                    execution.getClassificationId(),
+                    execution.getId(),
+                    null,
+                    execution.getSelectedPersonId(),
+                    "RoutingExecution",
+                    execution.getId(),
+                    stopReason.get(),
+                    AuditRecorder.correlationId(execution.getAlertId()),
+                    null,
+                    List.of()
+            ));
+            log.info("Escalation stopped for execution {}: {}", routingExecutionId, stopReason.get());
+            return;
+        }
+
         RoutingPolicy policy = routingPolicyRepositoryPort.findById(execution.getRoutingPolicyId()).orElse(null);
         if (policy == null) {
             routingEscalationEngine.complete(execution, "Routing policy not found");
             return;
         }
 
-        RoutingEscalationContextLoader.LoadedEscalationContext loaded = contextLoader.load(execution);
         Optional<RoutingEscalationEngine.EscalationAdvanceResult> advance = routingEscalationEngine.advanceStep(
                 execution,
                 policy,

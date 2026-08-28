@@ -4,6 +4,7 @@ import FST.MST_RSI.PFA.notification.application.usecase.ApplyVoiceCallOutcomeUse
 import FST.MST_RSI.PFA.notification.domain.model.VoiceCallOutcome;
 import FST.MST_RSI.PFA.notification.domain.service.SipHangupCauseMapper;
 import FST.MST_RSI.PFA.notification.infrastructure.config.VoipNotificationProperties;
+import FST.MST_RSI.PFA.notification.infrastructure.persistence.VoiceCallSessionEntity;
 import FST.MST_RSI.PFA.notification.infrastructure.persistence.VoiceCallSessionJpaRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -24,6 +25,8 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -41,17 +44,15 @@ public class AsteriskAriEventListener extends TextWebSocketHandler {
     private final ObjectMapper objectMapper;
     private final VoipNotificationProperties properties;
 
-    // Channel state maps
     private final Map<String, Boolean> answered = new ConcurrentHashMap<>();
     private final Map<String, String> sounds = new ConcurrentHashMap<>();
     private final Map<String, Boolean> live = new ConcurrentHashMap<>();
 
-    // Bridge session tracking: sessionId -> [supervisorChannelId, adminChannelId]
-    // When both channels are answered, we bridge them.
     private final Map<String, String> channelToSession = new ConcurrentHashMap<>();
-    private final Map<String, String[]> sessionChannels = new ConcurrentHashMap<>();  // sessionId -> {ch1, ch2}
+    private final Map<String, String[]> sessionChannels = new ConcurrentHashMap<>();
     private final Map<String, Boolean> sessionBridged = new ConcurrentHashMap<>();
     private final Map<String, String> sessionBridgeId = new ConcurrentHashMap<>();
+    private final Set<String> tearingDown = ConcurrentHashMap.newKeySet();
 
     private final ScheduledExecutorService reconnect = Executors.newSingleThreadScheduledExecutor();
     private volatile WebSocketSession session;
@@ -86,16 +87,25 @@ public class AsteriskAriEventListener extends TextWebSocketHandler {
         }
     }
 
-    /**
-     * Called by PlaceManualCallUseCase BEFORE originating to register the pair
-     * of channels that should be bridged together when both answer.
-     */
     public void registerBridgeSession(String sessionId, String supervisorChannelId, String adminChannelId) {
         sessionChannels.put(sessionId, new String[]{supervisorChannelId, adminChannelId});
         channelToSession.put(supervisorChannelId, sessionId);
         channelToSession.put(adminChannelId, sessionId);
         sessionBridged.put(sessionId, false);
+        tearingDown.remove(sessionId);
         log.info("[VOICE] Registered bridge session={} supervisor={} admin={}", sessionId, supervisorChannelId, adminChannelId);
+    }
+
+    public void terminateSession(String sessionId) {
+        teardownSession(sessionId, null, "SUPERVISOR");
+    }
+
+    public void terminateByChannel(String channelId) {
+        String sessionId = resolveSessionId(channelId);
+        teardownSession(sessionId, channelId, "SUPERVISOR");
+        if (sessionId == null) {
+            ariClient.hangup(channelId);
+        }
     }
 
     private void open() {
@@ -126,13 +136,26 @@ public class AsteriskAriEventListener extends TextWebSocketHandler {
         String type = event.path("type").asText();
         JsonNode channel = event.path("channel");
         String channelId = channel.path("id").asText(null);
+
+        if ("BridgeDestroyed".equals(type)) {
+            String bridgeId = event.path("bridge").path("id").asText(null);
+            if (bridgeId != null) {
+                sessionBridgeId.entrySet().removeIf(e -> bridgeId.equals(e.getValue()));
+            }
+            return;
+        }
+
         if (channelId == null || channelId.isBlank()) {
             return;
         }
         switch (type) {
             case "StasisStart" -> onStasisStart(event, channelId);
             case "ChannelStateChange" -> onStateChange(channel, channelId);
-            case "PlaybackFinished" -> ariClient.hangup(channelId);
+            case "PlaybackFinished" -> {
+                if (!Boolean.TRUE.equals(live.get(channelId))) {
+                    ariClient.hangup(channelId);
+                }
+            }
             case "ChannelDestroyed", "ChannelHangupRequest" -> onHangup(channel, channelId);
             default -> {
             }
@@ -146,6 +169,10 @@ public class AsteriskAriEventListener extends TextWebSocketHandler {
         Map<String, String> parsed = parseArgs(args);
         sounds.put(channelId, parsed.getOrDefault("sound", ""));
         live.put(channelId, Boolean.parseBoolean(parsed.getOrDefault("live", "false")));
+        String sessionFromArgs = parsed.get("session");
+        if (sessionFromArgs != null && !sessionFromArgs.isBlank()) {
+            channelToSession.putIfAbsent(channelId, sessionFromArgs);
+        }
 
         try {
             ariClient.answer(channelId);
@@ -156,16 +183,13 @@ public class AsteriskAriEventListener extends TextWebSocketHandler {
             boolean isLive = Boolean.TRUE.equals(live.get(channelId));
 
             if (isLive) {
-                // Check if this channel is part of a bridge session
                 String sessionId = channelToSession.get(channelId);
                 if (sessionId != null) {
                     tryBridgeSession(sessionId);
                 } else {
-                    // Standalone live call (no bridge partner) — record individually
                     ariClient.record(channelId, "manual-" + channelId);
                 }
             } else if (sound != null && !sound.isBlank()) {
-                // Automated TTS playback
                 ariClient.play(channelId, sound);
             }
         } catch (Exception ex) {
@@ -173,16 +197,14 @@ public class AsteriskAriEventListener extends TextWebSocketHandler {
         }
     }
 
-    /**
-     * Attempts to bridge a session when both channels have answered.
-     * This is safe to call multiple times — only acts once (when both are ready).
-     */
     private synchronized void tryBridgeSession(String sessionId) {
         if (Boolean.TRUE.equals(sessionBridged.get(sessionId))) {
-            return; // already bridged
+            return;
         }
         String[] channels = sessionChannels.get(sessionId);
-        if (channels == null || channels.length < 2) return;
+        if (channels == null || channels.length < 2) {
+            return;
+        }
 
         String supervisorCh = channels[0];
         String adminCh = channels[1];
@@ -195,15 +217,17 @@ public class AsteriskAriEventListener extends TextWebSocketHandler {
             return;
         }
 
-        // Both channels answered — create bridge
         log.info("[VOICE] Both channels ready for session={}, creating bridge...", sessionId);
         String bridgeId = ariClient.bridge(supervisorCh, adminCh);
         if (bridgeId != null) {
             sessionBridgeId.put(sessionId, bridgeId);
             sessionBridged.put(sessionId, true);
-            // Record the bridge (captures both sides mixed)
             String recName = "manual-" + sessionId;
             ariClient.recordBridge(bridgeId, recName);
+            try {
+                applyVoiceCallOutcomeUseCase.attachBridge(UUID.fromString(sessionId), bridgeId, recName);
+            } catch (IllegalArgumentException ignored) {
+            }
             log.info("[VOICE] Bridge active session={} bridgeId={} recording={}", sessionId, bridgeId, recName);
         }
     }
@@ -217,49 +241,121 @@ public class AsteriskAriEventListener extends TextWebSocketHandler {
         if ("Up".equalsIgnoreCase(state)) {
             answered.put(channelId, true);
             applyVoiceCallOutcomeUseCase.answered(channelId);
+            String sessionId = channelToSession.get(channelId);
+            if (sessionId != null && Boolean.TRUE.equals(live.get(channelId))) {
+                tryBridgeSession(sessionId);
+            }
         }
     }
 
     private void onHangup(JsonNode channel, String channelId) {
-        Integer cause = null;
-        if (channel.has("hangup_cause") && channel.path("hangup_cause").canConvertToInt()) {
-            cause = channel.path("hangup_cause").asInt();
-        } else if (channel.has("cause") && channel.path("cause").canConvertToInt()) {
-            cause = channel.path("cause").asInt();
-        } else {
-            var sessionOpt = sessionRepository.findByProviderCallId(channelId);
-            if (sessionOpt.isPresent()) {
-                cause = sessionOpt.get().getHangupCause();
-            }
-        }
+        Integer cause = extractCause(channel, channelId);
+        String sessionId = resolveSessionId(channelId);
+        String hangupSource = hangupSource(sessionId, channelId);
+        teardownSession(sessionId, channelId, hangupSource);
 
-        // If this channel is part of a bridge session, tear down the bridge
-        String sessionId = channelToSession.remove(channelId);
-        if (sessionId != null) {
+        boolean wasAnswered = Boolean.TRUE.equals(answered.get(channelId));
+        VoiceCallOutcome outcome = SipHangupCauseMapper.fromCause(cause, wasAnswered);
+        applyVoiceCallOutcomeUseCase.finished(channelId, outcome, cause, hangupSource);
+        answered.remove(channelId);
+        sounds.remove(channelId);
+        live.remove(channelId);
+    }
+
+    public void teardownSession(String sessionId, String originatingChannelId, String hangupSource) {
+        if (sessionId == null || !tearingDown.add(sessionId)) {
+            if (sessionId == null && originatingChannelId != null) {
+                ariClient.hangup(originatingChannelId);
+            }
+            return;
+        }
+        try {
+            VoiceCallSessionEntity dbSession = null;
+            try {
+                dbSession = sessionRepository.findById(UUID.fromString(sessionId)).orElse(null);
+            } catch (IllegalArgumentException ignored) {
+            }
+            if (dbSession == null && originatingChannelId != null) {
+                dbSession = sessionRepository.findByAnyChannelId(originatingChannelId).orElse(null);
+            }
+
             String bridgeId = sessionBridgeId.remove(sessionId);
+            if (bridgeId == null && dbSession != null) {
+                bridgeId = dbSession.getBridgeId();
+            }
+            String recordingName = dbSession != null && dbSession.getRecordingName() != null
+                    ? dbSession.getRecordingName()
+                    : "manual-" + sessionId;
             if (bridgeId != null) {
-                ariClient.stopRecording("manual-" + sessionId);
+                ariClient.stopRecording(recordingName);
                 ariClient.destroyBridge(bridgeId);
             }
-            // Also hangup the other channel in the session
+
             String[] channels = sessionChannels.remove(sessionId);
+            if (channels == null && dbSession != null) {
+                channels = new String[]{dbSession.getSupervisorChannelId(), dbSession.getProviderCallId()};
+            }
             if (channels != null) {
                 for (String ch : channels) {
-                    if (!ch.equals(channelId)) {
-                        channelToSession.remove(ch);
+                    if (ch == null || ch.isBlank()) {
+                        continue;
+                    }
+                    channelToSession.remove(ch);
+                    if (!ch.equals(originatingChannelId)) {
+                        log.info("[VOICE] Hanging up peer channel {} after {} hangup session={}", ch, hangupSource, sessionId);
                         ariClient.hangup(ch);
                     }
                 }
             }
             sessionBridged.remove(sessionId);
+        } finally {
+            log.info("[VOICE] Session teardown complete session={} source={}", sessionId, hangupSource);
         }
+    }
 
-        boolean wasAnswered = Boolean.TRUE.equals(answered.get(channelId));
-        VoiceCallOutcome outcome = SipHangupCauseMapper.fromCause(cause, wasAnswered);
-        applyVoiceCallOutcomeUseCase.finished(channelId, outcome, cause);
-        answered.remove(channelId);
-        sounds.remove(channelId);
-        live.remove(channelId);
+    private String resolveSessionId(String channelId) {
+        String sessionId = channelToSession.get(channelId);
+        if (sessionId != null) {
+            return sessionId;
+        }
+        return sessionRepository.findByAnyChannelId(channelId)
+                .map(s -> s.getId().toString())
+                .orElse(null);
+    }
+
+    private String hangupSource(String sessionId, String channelId) {
+        VoiceCallSessionEntity db = null;
+        try {
+            if (sessionId != null) {
+                db = sessionRepository.findById(UUID.fromString(sessionId)).orElse(null);
+            }
+        } catch (IllegalArgumentException ignored) {
+        }
+        if (db == null) {
+            db = sessionRepository.findByAnyChannelId(channelId).orElse(null);
+        }
+        if (db == null) {
+            return "UNKNOWN";
+        }
+        if (channelId.equals(db.getSupervisorChannelId())) {
+            return "SUPERVISOR";
+        }
+        if (channelId.equals(db.getProviderCallId())) {
+            return "OPS";
+        }
+        return "UNKNOWN";
+    }
+
+    private Integer extractCause(JsonNode channel, String channelId) {
+        if (channel.has("hangup_cause") && channel.path("hangup_cause").canConvertToInt()) {
+            return channel.path("hangup_cause").asInt();
+        }
+        if (channel.has("cause") && channel.path("cause").canConvertToInt()) {
+            return channel.path("cause").asInt();
+        }
+        return sessionRepository.findByAnyChannelId(channelId)
+                .map(VoiceCallSessionEntity::getHangupCause)
+                .orElse(null);
     }
 
     private static Map<String, String> parseArgs(String args) {

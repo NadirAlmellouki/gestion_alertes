@@ -5,5 +5,6 @@ public enum NotificationStatus {
     SENT,
     FAILED,
     DEFERRED,
-    SKIPPED
+    SKIPPED,
+    ACKNOWLEDGED
 }

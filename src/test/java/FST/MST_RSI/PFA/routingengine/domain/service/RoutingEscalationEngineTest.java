@@ -145,6 +145,29 @@ class RoutingEscalationEngineTest {
     }
 
     @Test
+    void completeIsIdempotent() {
+        RoutingExecutionEntity execution = execution(1, RoutingExecutionStatus.COMPLETED, 0);
+        execution.setFinishedAt(Instant.now().minusSeconds(10));
+
+        engine.complete(execution, "duplicate");
+
+        assertThat(execution.getRoutingStatus()).isEqualTo(RoutingExecutionStatus.COMPLETED);
+        verify(routingExecutionRepository).save(execution);
+    }
+
+    @Test
+    void advanceStepDoesNothingWhenAlreadyCompleted() {
+        RoutingExecutionEntity execution = execution(1, RoutingExecutionStatus.COMPLETED, 0);
+        RoutingPolicy policy = policy(step(1, "VOICE_CALL", 300), step(2, "VOICE_CALL", 120));
+
+        Optional<RoutingEscalationEngine.EscalationAdvanceResult> result =
+                engine.advanceStep(execution, policy, sampleContext());
+
+        assertThat(result).isEmpty();
+        assertThat(execution.getRoutingStatus()).isEqualTo(RoutingExecutionStatus.COMPLETED);
+    }
+
+    @Test
     void expireMarksExecutionExpired() {
         RoutingExecutionEntity execution = execution(1, RoutingExecutionStatus.AWAITING_ESCALATION, 0);
 

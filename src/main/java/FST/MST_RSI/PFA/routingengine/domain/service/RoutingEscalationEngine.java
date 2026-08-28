@@ -36,7 +36,9 @@ public class RoutingEscalationEngine {
 
     @Transactional
     public void scheduleNextStep(RoutingExecutionEntity execution, RoutingStepDefinition currentStep) {
-        if (execution.getRoutingStatus().equals(RoutingExecutionStatus.COMPLETED)) {
+        if (execution.getRoutingStatus().equals(RoutingExecutionStatus.COMPLETED)
+                || RoutingExecutionStatus.EXPIRED.equals(execution.getRoutingStatus())
+                || RoutingExecutionStatus.NO_PERSON.equals(execution.getRoutingStatus())) {
             return;
         }
         int delaySeconds = Math.max(0, currentStep.delayAfterSeconds());
@@ -54,6 +56,9 @@ public class RoutingEscalationEngine {
             RoutingPolicy policy,
             RoutingContext context
     ) {
+        if (isTerminal(execution.getRoutingStatus())) {
+            return Optional.empty();
+        }
         execution.setRoutingStatus(RoutingExecutionStatus.IN_PROGRESS);
         execution.setNextEscalationAt(null);
 
@@ -100,6 +105,11 @@ public class RoutingEscalationEngine {
 
     @Transactional
     public void complete(RoutingExecutionEntity execution, String reason) {
+        if (isTerminal(execution.getRoutingStatus())) {
+            execution.setNextEscalationAt(null);
+            routingExecutionRepository.save(execution);
+            return;
+        }
         execution.setRoutingStatus(RoutingExecutionStatus.COMPLETED);
         execution.setNextEscalationAt(null);
         execution.setFinishedAt(Instant.now());
@@ -143,6 +153,12 @@ public class RoutingEscalationEngine {
 
     private static boolean isRetryAction(String actionType) {
         return "VOICE_RETRY".equalsIgnoreCase(actionType) || "VOICE_CALL".equalsIgnoreCase(actionType);
+    }
+
+    private static boolean isTerminal(String status) {
+        return RoutingExecutionStatus.COMPLETED.equals(status)
+                || RoutingExecutionStatus.EXPIRED.equals(status)
+                || RoutingExecutionStatus.NO_PERSON.equals(status);
     }
 
     private static UUID resolveUnitId(RoutingContext context, RoutingStepDefinition step) {

@@ -33,6 +33,21 @@ public class VoiceCallSessionEntity {
     @Column(name = "provider_call_id", length = 128)
     private String providerCallId;
 
+    @Column(name = "supervisor_channel_id", length = 128)
+    private String supervisorChannelId;
+
+    @Column(name = "supervisor_extension", length = 32)
+    private String supervisorExtension;
+
+    @Column(name = "bridge_id", length = 128)
+    private String bridgeId;
+
+    @Column(name = "recording_name")
+    private String recordingName;
+
+    @Column(name = "hangup_source", length = 30)
+    private String hangupSource;
+
     @Column(name = "sound_name")
     private String soundName;
 
@@ -117,6 +132,46 @@ public class VoiceCallSessionEntity {
 
     public void setProviderCallId(String providerCallId) {
         this.providerCallId = providerCallId;
+    }
+
+    public String getSupervisorChannelId() {
+        return supervisorChannelId;
+    }
+
+    public void setSupervisorChannelId(String supervisorChannelId) {
+        this.supervisorChannelId = supervisorChannelId;
+    }
+
+    public String getSupervisorExtension() {
+        return supervisorExtension;
+    }
+
+    public void setSupervisorExtension(String supervisorExtension) {
+        this.supervisorExtension = supervisorExtension;
+    }
+
+    public String getBridgeId() {
+        return bridgeId;
+    }
+
+    public void setBridgeId(String bridgeId) {
+        this.bridgeId = bridgeId;
+    }
+
+    public String getRecordingName() {
+        return recordingName;
+    }
+
+    public void setRecordingName(String recordingName) {
+        this.recordingName = recordingName;
+    }
+
+    public String getHangupSource() {
+        return hangupSource;
+    }
+
+    public void setHangupSource(String hangupSource) {
+        this.hangupSource = hangupSource;
     }
 
     public String getSoundName() {

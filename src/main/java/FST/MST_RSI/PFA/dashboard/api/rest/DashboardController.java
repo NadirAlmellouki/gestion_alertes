@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/dashboard")
@@ -83,8 +84,11 @@ public class DashboardController {
 
     @PostMapping("/manual-calls/hangup")
     @PreAuthorize("hasRole('SUPERVISOR')")
-    public void hangupManualCall(@RequestParam(required = false) String channelId) {
-        placeManualCallUseCase.hangup(channelId);
+    public void hangupManualCall(
+            @RequestParam(required = false) UUID sessionId,
+            @RequestParam(required = false) String channelId
+    ) {
+        placeManualCallUseCase.hangup(sessionId, channelId);
     }
 
     private InstantRange resolveRange(Instant from, Instant to) {

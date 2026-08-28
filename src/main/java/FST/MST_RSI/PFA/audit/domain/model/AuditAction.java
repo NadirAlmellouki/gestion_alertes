@@ -10,6 +10,7 @@ public final class AuditAction {
     public static final String NOTIFICATION_ATTEMPTED = "NOTIFICATION_ATTEMPTED";
     public static final String ESCALATION_SCHEDULED = "ESCALATION_SCHEDULED";
     public static final String ESCALATION_PROCESSED = "ESCALATION_PROCESSED";
+    public static final String ESCALATION_STOPPED = "ESCALATION_STOPPED";
     public static final String RESOLUTION_CHECK_SCHEDULED = "RESOLUTION_CHECK_SCHEDULED";
     public static final String RESOLUTION_CHECK_COMPLETED = "RESOLUTION_CHECK_COMPLETED";
     public static final String PIPELINE_COMPLETED = "PIPELINE_COMPLETED";

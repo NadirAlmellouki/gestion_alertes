@@ -10,6 +10,9 @@ public record ManualCallResult(
         String detail,
         UUID notificationId,
         UUID alertId,
-        boolean liveConversation
+        boolean liveConversation,
+        UUID sessionId,
+        String supervisorChannelId,
+        String adminChannelId
 ) {
 }

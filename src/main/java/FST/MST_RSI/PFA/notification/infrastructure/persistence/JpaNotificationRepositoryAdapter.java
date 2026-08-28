@@ -128,7 +128,7 @@ public class JpaNotificationRepositoryAdapter implements NotificationRepositoryP
 
     private static String mapAttemptStatus(NotificationStatus status) {
         return switch (status) {
-            case SENT -> "SENT";
+            case SENT, ACKNOWLEDGED -> "SENT";
             case FAILED -> "FAILED";
             default -> "PENDING";
         };

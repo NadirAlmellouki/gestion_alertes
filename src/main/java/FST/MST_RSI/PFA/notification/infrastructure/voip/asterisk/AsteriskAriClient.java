@@ -156,8 +156,22 @@ public class AsteriskAriClient {
     }
 
     public void hangup(String channelId) {
+        hangup(channelId, "normal");
+    }
+
+    public void hangup(String channelId, String reason) {
+        if (channelId == null || channelId.isBlank()) {
+            return;
+        }
         try {
-            client().delete().uri("/ari/channels/{id}", channelId).retrieve().toBodilessEntity();
+            client().delete()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/ari/channels/{id}")
+                            .queryParam("reason", reason == null ? "normal" : reason)
+                            .build(channelId))
+                    .retrieve()
+                    .toBodilessEntity();
+            log.info("[VOICE] Hangup requested channelId={} reason={}", channelId, reason);
         } catch (Exception ex) {
             log.debug("[VOICE] Hangup ignored for {}: {}", channelId, ex.getMessage());
         }
