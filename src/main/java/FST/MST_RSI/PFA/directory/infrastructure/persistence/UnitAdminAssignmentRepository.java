@@ -9,5 +9,9 @@ public interface UnitAdminAssignmentRepository extends JpaRepository<UnitAdminAs
 
     Optional<UnitAdminAssignmentEntity> findByUnitIdAndPersonIdAndRole(UUID unitId, UUID personId, String role);
 
+    java.util.List<UnitAdminAssignmentEntity> findByUnitIdAndActiveTrue(UUID unitId);
+
     java.util.List<UnitAdminAssignmentEntity> findByUnitIdAndRoleAndActiveTrueOrderByPrimaryContactDesc(UUID unitId, String role);
+
+    java.util.List<UnitAdminAssignmentEntity> findByPersonIdAndActiveTrue(UUID personId);
 }

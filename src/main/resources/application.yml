@@ -73,9 +73,9 @@ app:
     provider: gemini
     gemini:
       api-key: ${GEMINI_API_KEY}
-      model: ${GEMINI_MODEL:gemini-3.6-flash}
+      model: ${GEMINI_MODEL:gemini-3.5-flash}
       base-url: ${GEMINI_BASE_URL:https://generativelanguage.googleapis.com}
-      timeout-seconds: 30
+      timeout-seconds: 60
   voice:
     tts:
       provider: ${TTS_PROVIDER:elevenlabs}

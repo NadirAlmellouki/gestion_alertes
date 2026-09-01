@@ -6,9 +6,12 @@ import FST.MST_RSI.PFA.audit.application.service.AuditRecorder;
 import FST.MST_RSI.PFA.audit.domain.model.AuditAction;
 import FST.MST_RSI.PFA.audit.domain.model.AuditRecord;
 import FST.MST_RSI.PFA.notification.application.service.LiveManualCallTracker;
+import FST.MST_RSI.PFA.notification.application.service.RecordPersonVoipContactUseCase;
+import FST.MST_RSI.PFA.notification.application.service.VoiceCallNarrative;
 import FST.MST_RSI.PFA.notification.domain.model.NotificationStatus;
 import FST.MST_RSI.PFA.notification.domain.model.VoiceCallOutcome;
 import FST.MST_RSI.PFA.notification.domain.port.NotificationRepositoryPort;
+import FST.MST_RSI.PFA.notification.domain.service.SipHangupCauseMapper;
 import FST.MST_RSI.PFA.notification.infrastructure.persistence.VoiceCallSessionEntity;
 import FST.MST_RSI.PFA.notification.infrastructure.persistence.VoiceCallSessionJpaRepository;
 import FST.MST_RSI.PFA.routingengine.domain.model.RoutingExecutionStatus;
@@ -37,6 +40,8 @@ public class ApplyVoiceCallOutcomeUseCase {
     private final RoutingEscalationEngine routingEscalationEngine;
     private final AuditRecorder auditRecorder;
     private final LiveManualCallTracker liveManualCallTracker;
+    private final VoiceCallNarrative voiceCallNarrative;
+    private final RecordPersonVoipContactUseCase recordPersonVoipContactUseCase;
 
     public ApplyVoiceCallOutcomeUseCase(
             VoiceCallSessionJpaRepository sessionRepository,
@@ -45,7 +50,9 @@ public class ApplyVoiceCallOutcomeUseCase {
             RoutingExecutionRepository routingExecutionRepository,
             RoutingEscalationEngine routingEscalationEngine,
             AuditRecorder auditRecorder,
-            LiveManualCallTracker liveManualCallTracker
+            LiveManualCallTracker liveManualCallTracker,
+            VoiceCallNarrative voiceCallNarrative,
+            RecordPersonVoipContactUseCase recordPersonVoipContactUseCase
     ) {
         this.sessionRepository = sessionRepository;
         this.notificationRepositoryPort = notificationRepositoryPort;
@@ -54,6 +61,8 @@ public class ApplyVoiceCallOutcomeUseCase {
         this.routingEscalationEngine = routingEscalationEngine;
         this.auditRecorder = auditRecorder;
         this.liveManualCallTracker = liveManualCallTracker;
+        this.voiceCallNarrative = voiceCallNarrative;
+        this.recordPersonVoipContactUseCase = recordPersonVoipContactUseCase;
     }
 
     @Transactional
@@ -68,7 +77,8 @@ public class ApplyVoiceCallOutcomeUseCase {
             }
             sessionRepository.save(session);
             publish(session, true);
-            audit(session, AuditAction.VOICE_CALL_RINGING, "SIP RINGING");
+            audit(session, AuditAction.VOICE_CALL_RINGING,
+                    voiceCallNarrative.describe(session, "RINGING", null, null), null);
         });
     }
 
@@ -79,8 +89,9 @@ public class ApplyVoiceCallOutcomeUseCase {
                 return;
             }
             Instant now = Instant.now();
+            boolean firstAnswer = session.getAnsweredAt() == null;
             session.setOutcome(VoiceCallOutcome.ANSWERED.name());
-            if (session.getAnsweredAt() == null) {
+            if (firstAnswer) {
                 session.setAnsweredAt(now);
             }
             sessionRepository.save(session);
@@ -88,8 +99,12 @@ public class ApplyVoiceCallOutcomeUseCase {
                 notificationRepositoryPort.updateStatus(session.getNotificationId(), NotificationStatus.ACKNOWLEDGED);
             }
             stopEscalationAfterVoipAnswer(session, "Appel VoIP répondu — prise en charge");
+            if (firstAnswer) {
+                recordPersonVoipContactUseCase.recordAnswered(session);
+            }
             publish(session, true);
-            audit(session, AuditAction.VOICE_CALL_ANSWERED, "SIP ANSWERED");
+            audit(session, AuditAction.VOICE_CALL_ANSWERED,
+                    voiceCallNarrative.describe(session, "ANSWERED", null, null), null);
         });
     }
 
@@ -104,11 +119,16 @@ public class ApplyVoiceCallOutcomeUseCase {
 
     @Transactional
     public void finished(String providerCallId, VoiceCallOutcome outcome, Integer hangupCause) {
-        finished(providerCallId, outcome, hangupCause, null);
+        finished(providerCallId, outcome, hangupCause, null, null);
     }
 
     @Transactional
     public void finished(String providerCallId, VoiceCallOutcome outcome, Integer hangupCause, String hangupSource) {
+        finished(providerCallId, outcome, hangupCause, hangupSource, null);
+    }
+
+    @Transactional
+    public void finished(String providerCallId, VoiceCallOutcome outcome, Integer hangupCause, String hangupSource, String causeTxt) {
         VoiceCallSessionEntity session = resolve(providerCallId).orElse(null);
         if (session == null) {
             return;
@@ -118,9 +138,12 @@ public class ApplyVoiceCallOutcomeUseCase {
             return;
         }
         Instant now = Instant.now();
+        boolean answered = session.getAnsweredAt() != null;
+        String failureReason = SipHangupCauseMapper.describe(hangupCause, answered, causeTxt);
         session.setOutcome(outcome.name());
         session.setHangupCause(hangupCause);
         session.setHangupSource(hangupSource);
+        session.setFailureReason(failureReason);
         session.setEndedAt(now);
         Instant start = session.getAnsweredAt() != null ? session.getAnsweredAt() : session.getStartedAt();
         if (start != null) {
@@ -128,7 +151,6 @@ public class ApplyVoiceCallOutcomeUseCase {
         }
         sessionRepository.save(session);
 
-        boolean answered = session.getAnsweredAt() != null;
         boolean success = answered
                 || outcome == VoiceCallOutcome.ANSWERED
                 || outcome == VoiceCallOutcome.HANGUP;
@@ -152,6 +174,7 @@ public class ApplyVoiceCallOutcomeUseCase {
         if (answered) {
             stopEscalationAfterVoipAnswer(session, "VoIP answered / hangup after audio");
         }
+        recordPersonVoipContactUseCase.recordFinished(session);
 
         String action = switch (outcome) {
             case REJECTED -> AuditAction.VOICE_CALL_REJECTED;
@@ -160,9 +183,10 @@ public class ApplyVoiceCallOutcomeUseCase {
             case FAILED -> AuditAction.VOICE_CALL_FAILED;
             default -> AuditAction.VOICE_CALL_HANGUP;
         };
-        audit(session, action, "SIP " + outcome + " cause=" + hangupCause);
+        String description = voiceCallNarrative.describe(session, "FINISHED", hangupCause, causeTxt);
+        audit(session, action, description, hangupCause);
         publish(session, false);
-        log.info("[VOICE] SIP state={} callId={} cause={} source={}", outcome, providerCallId, hangupCause, hangupSource);
+        log.info("[VOICE] {}", description);
     }
 
     public java.util.Optional<VoiceCallSessionEntity> resolve(String channelId) {
@@ -209,7 +233,7 @@ public class ApplyVoiceCallOutcomeUseCase {
         ));
     }
 
-    private void audit(VoiceCallSessionEntity session, String action, String description) {
+    private void audit(VoiceCallSessionEntity session, String action, String description, Integer hangupCause) {
         auditRecorder.record(new AuditRecord(
                 action,
                 session.getAlertId(),
@@ -219,10 +243,16 @@ public class ApplyVoiceCallOutcomeUseCase {
                 session.getPersonId(),
                 "VoiceCallSession",
                 session.getId(),
-                description + " ext=" + session.getExtension(),
+                description,
                 AuditRecorder.correlationId(session.getAlertId() != null ? session.getAlertId() : session.getId()),
                 null,
-                List.of()
+                List.of(
+                        new AuditRecord.AuditDetail("outcome", null, session.getOutcome()),
+                        new AuditRecord.AuditDetail("hangupCause", null,
+                                hangupCause != null ? hangupCause.toString() : "absent"),
+                        new AuditRecord.AuditDetail("extension", null, session.getExtension()),
+                        new AuditRecord.AuditDetail("hangupSource", null, session.getHangupSource())
+                )
         ));
     }
 }

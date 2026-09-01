@@ -13,6 +13,8 @@ public record AdminAvailabilityDto(
         long successCount,
         long failedCount,
         long voipCalls,
-        Instant lastContactAt
+        Instant lastContactAt,
+        String lastVoipOutcome,
+        String sipReachability
 ) {
 }

@@ -23,8 +23,11 @@ import FST.MST_RSI.PFA.notification.domain.port.NotificationRepositoryPort;
 import FST.MST_RSI.PFA.notification.domain.port.SmsNotificationPort;
 import FST.MST_RSI.PFA.notification.domain.port.VoiceCallPort;
 import FST.MST_RSI.PFA.notification.infrastructure.config.VoipNotificationProperties;
+import FST.MST_RSI.PFA.directory.infrastructure.persistence.PersonContactStateEntity;
+import FST.MST_RSI.PFA.directory.infrastructure.persistence.PersonContactStateRepository;
 import FST.MST_RSI.PFA.directory.infrastructure.persistence.PersonEntity;
 import FST.MST_RSI.PFA.directory.infrastructure.persistence.PersonRepository;
+import FST.MST_RSI.PFA.notification.application.service.RecordPersonVoipContactUseCase;
 import FST.MST_RSI.PFA.notification.infrastructure.persistence.NotificationTemplateEntity;
 import FST.MST_RSI.PFA.notification.infrastructure.persistence.NotificationTemplateJpaRepository;
 import FST.MST_RSI.PFA.routingengine.domain.model.RoutingDecision;
@@ -64,6 +67,8 @@ public class ExecuteNotificationWorkflowUseCase {
     private final TextToSpeechPort textToSpeechPort;
     private final ObjectProvider<VoiceCallPort> voiceCallPortProvider;
     private final AuditRecorder auditRecorder;
+    private final PersonContactStateRepository contactStateRepository;
+    private final RecordPersonVoipContactUseCase recordPersonVoipContactUseCase;
 
     public ExecuteNotificationWorkflowUseCase(
             EmailNotificationPort emailNotificationPort,
@@ -79,7 +84,9 @@ public class ExecuteNotificationWorkflowUseCase {
             VoipMessageComposer voipMessageComposer,
             TextToSpeechPort textToSpeechPort,
             ObjectProvider<VoiceCallPort> voiceCallPortProvider,
-            AuditRecorder auditRecorder
+            AuditRecorder auditRecorder,
+            PersonContactStateRepository contactStateRepository,
+            RecordPersonVoipContactUseCase recordPersonVoipContactUseCase
     ) {
         this.emailNotificationPort = emailNotificationPort;
         this.smsNotificationPort = smsNotificationPort;
@@ -95,6 +102,8 @@ public class ExecuteNotificationWorkflowUseCase {
         this.textToSpeechPort = textToSpeechPort;
         this.voiceCallPortProvider = voiceCallPortProvider;
         this.auditRecorder = auditRecorder;
+        this.contactStateRepository = contactStateRepository;
+        this.recordPersonVoipContactUseCase = recordPersonVoipContactUseCase;
     }
 
     @Transactional
@@ -295,6 +304,14 @@ public class ExecuteNotificationWorkflowUseCase {
             return NotificationWorkflowResult.skipped("NO_RECIPIENT_PHONE");
         }
 
+        String sipReachability = contactStateRepository.findById(personId)
+                .map(PersonContactStateEntity::getSipReachability)
+                .orElse(null);
+        if (RecordPersonVoipContactUseCase.shouldSkipAutoVoip(sipReachability)) {
+            log.info("Skipping auto VoIP for person {}: SIP {}", personId, sipReachability);
+            return NotificationWorkflowResult.skipped("SIP_" + sipReachability);
+        }
+
         String message = voipMessageComposer.compose(alert, classification, routingDecision.selectedPersonName());
         TtsAudio audio = textToSpeechPort.synthesize(message).orElse(null);
 
@@ -341,6 +358,7 @@ public class ExecuteNotificationWorkflowUseCase {
         notificationRepositoryPort.updateStatus(notification.id(), NotificationStatus.FAILED);
         alert.markNotificationFailed();
         alertRepositoryPort.save(alert);
+        recordPersonVoipContactUseCase.recordOriginateFailure(personId, deliveryResult.errorMessage());
         auditNotification(alert, routingDecision, notification.id(), "VOIP", "VOIP_FAILED", NotificationStatus.FAILED);
         return NotificationWorkflowResult.voipFailed(notification.id(), deliveryResult.errorMessage());
     }

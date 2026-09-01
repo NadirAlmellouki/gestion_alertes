@@ -83,6 +83,10 @@ class ExecuteNotificationWorkflowUseCaseTest {
     private ObjectProvider<VoiceCallPort> voiceCallPortProvider;
     @Mock
     private AuditRecorder auditRecorder;
+    @Mock
+    private FST.MST_RSI.PFA.directory.infrastructure.persistence.PersonContactStateRepository contactStateRepository;
+    @Mock
+    private FST.MST_RSI.PFA.notification.application.service.RecordPersonVoipContactUseCase recordPersonVoipContactUseCase;
 
     private VoipNotificationProperties voipProperties;
     private ExecuteNotificationWorkflowUseCase useCase;
@@ -107,8 +111,11 @@ class ExecuteNotificationWorkflowUseCaseTest {
                 voipMessageComposer,
                 textToSpeechPort,
                 voiceCallPortProvider,
-                auditRecorder
+                auditRecorder,
+                contactStateRepository,
+                recordPersonVoipContactUseCase
         );
+        lenient().when(contactStateRepository.findById(any())).thenReturn(Optional.empty());
     }
 
     @Test

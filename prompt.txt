@@ -1,239 +1,762 @@
-Corrige les deux problèmes actuellement observés sur les appels VoIP manuels du superviseur dans AlertOps.
+# MISSION — DIAGNOSTIC ET CORRECTION FINALE D'ALERTOPS
 
-## 1. CRASH DU FRONTEND LORSQUE L'OPS RÉPOND
+Tu travailles sur le projet AlertOps.
 
-Scénario actuel :
+Cette conversation est une nouvelle conversation. Tu ne dois donc pas supposer que tu connais les décisions prises dans les anciennes conversations.
 
-1. Le superviseur ouvre l'application dans le navigateur.
-2. Il déclenche un appel manuel vers un OPS.
-3. Le navigateur et MicroSIP sonnent correctement.
-4. L'OPS clique sur "Répondre" dans MicroSIP.
-5. L'appel semble être accepté côté SIP/Asterisk.
-6. À cet instant, l'application web du superviseur devient complètement blanche.
-7. La console du navigateur contient une erreur JavaScript/React comme le suivant {Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
-ManualCallModal.jsx:258 Uncaught ReferenceError: muted is not defined
-    at ManualCallModal (ManualCallModal.jsx:258:27
-    at Object.react_stack_bottom_frame (react-dom-client.development.js:25904:20)
-    at renderWithHooks (react-dom-client.development.js:7662:22)
-    at updateFunctionComponent (react-dom-client.development.js:10166:19)
-    at beginWork (react-dom-client.development.js:11778:18)
-    at runWithFiberInDEV (react-dom-client.development.js:871:30)
-    at performUnitOfWork (react-dom-client.development.js:17641:22)
-    at workLoopSync (react-dom-client.development.js:17469:41)
-    at renderRootSync (react-dom-client.development.js:17450:11)
-    at performWorkOnRoot (react-dom-client.development.js:16583:35)
-(anonymous) @ ManualCallModal.jsx:258
-react_stack_bottom_frame @ react-dom-client.development.js:25904
-renderWithHooks @ react-dom-client.development.js:7662
-updateFunctionComponent @ react-dom-client.development.js:10166
-beginWork @ react-dom-client.development.js:11778
-runWithFiberInDEV @ react-dom-client.development.js:871
-performUnitOfWork @ react-dom-client.development.js:17641
-workLoopSync @ react-dom-client.development.js:17469
-renderRootSync @ react-dom-client.development.js:17450
-performWorkOnRoot @ react-dom-client.development.js:16583
-performWorkOnRootViaSchedulerTask @ react-dom-client.development.js:18957
-performWorkUntilDeadline @ scheduler.development.js:45
-<ManualCallModal>
-(anonymous) @ react-jsx-dev-runtime.development.js:335
-(anonymous) @ RecipientsPage.jsx:142
-react_stack_bottom_frame @ react-dom-client.development.js:25904
-renderWithHooksAgain @ react-dom-client.development.js:7762
-renderWithHooks @ react-dom-client.development.js:7674
-updateFunctionComponent @ react-dom-client.development.js:10166
-beginWork @ react-dom-client.development.js:11778
-runWithFiberInDEV @ react-dom-client.development.js:871
-performUnitOfWork @ react-dom-client.development.js:17641
-workLoopSync @ react-dom-client.development.js:17469
-renderRootSync @ react-dom-client.development.js:17450
-performWorkOnRoot @ react-dom-client.development.js:16504
-performSyncWorkOnRoot @ react-dom-client.development.js:18972
-flushSyncWorkAcrossRoots_impl @ react-dom-client.development.js:18814
-processRootScheduleInMicrotask @ react-dom-client.development.js:18853
-anonymousCallbackTo: scheduleMicrotask @ react-dom-client.development.js:18991
-client:529 An error occurred in the <ManualCallModal> component.
+Avant toute modification, reconstruis toi-même le contexte réel du projet à partir du workspace et des fichiers existants.
 
-Consider adding an error boundary to your tree to customize error handling behavior.
-Visit https://react.dev/link/error-boundaries to learn more about error boundaries.
+## 1. CONTEXTE À RECONSTRUIRE
 
-(anonymous) @ client:529
-defaultOnUncaughtError @ react-dom-client.development.js:9362
-logUncaughtError @ react-dom-client.development.js:9431
-runWithFiberInDEV @ react-dom-client.development.js:871
-lane.callback @ react-dom-client.development.js:9461
-callCallback @ react-dom-client.development.js:7423
-commitCallbacks @ react-dom-client.development.js:7443
-runWithFiberInDEV @ react-dom-client.development.js:874
-commitLayoutEffectOnFiber @ react-dom-client.development.js:14047
-flushLayoutEffects @ react-dom-client.development.js:18138
-commitRoot @ react-dom-client.development.js:17954
-commitRootWhenReady @ react-dom-client.development.js:16824
-performWorkOnRoot @ react-dom-client.development.js:16722
-performWorkOnRootViaSchedulerTask @ react-dom-client.development.js:18957
-performWorkUntilDeadline @ scheduler.development.js:45
-<ManualCallModal>
-(anonymous) @ react-jsx-dev-runtime.development.js:335
-(anonymous) @ RecipientsPage.jsx:142
-react_stack_bottom_frame @ react-dom-client.development.js:25904
-renderWithHooksAgain @ react-dom-client.development.js:7762
-renderWithHooks @ react-dom-client.development.js:7674
-updateFunctionComponent @ react-dom-client.development.js:10166
-beginWork @ react-dom-client.development.js:11778
-runWithFiberInDEV @ react-dom-client.development.js:871
-performUnitOfWork @ react-dom-client.development.js:17641
-workLoopSync @ react-dom-client.development.js:17469
-renderRootSync @ react-dom-client.development.js:17450
-performWorkOnRoot @ react-dom-client.development.js:16504
-performSyncWorkOnRoot @ react-dom-client.development.js:18972
-flushSyncWorkAcrossRoots_impl @ react-dom-client.development.js:18814
-processRootScheduleInMicrotask @ react-dom-client.development.js:18853
-anonymousCallbackTo: scheduleMicrotask @ react-dom-client.development.js:18991
-[NEW] Explain Console errors by using Copilot in Edge: click  to explain an error. Learn moreDon't show again}.
+Analyse complètement le projet avant de commencer.
 
-Analyse précisément cette erreur et trouve sa vraie cause.
+Lis notamment :
 
-Vérifie notamment :
-- PhoneContext / SIP.js / SimpleUser ;
-- les callbacks `onCallAnswered`, `onCallHangup`, etc. ;
-- la gestion du MediaStream et du `<audio>` ;
-- les références `useRef` ;
-- les changements d'état React au moment où l'appel devient `established` ;
-- les exceptions non gérées qui peuvent provoquer le rendu blanc ;
-- les données reçues depuis le backend ou Asterisk au moment de l'établissement du bridge.
-
-Ne masque pas simplement l'erreur avec un `try/catch`.
-Corrige la cause réelle.
-
-Le résultat attendu est :
-
-Superviseur navigateur
-→ appel manuel
-→ OPS répond sur MicroSIP
-→ frontend reste fonctionnel
-→ état de l'appel passe correctement à `established`
-→ microphone du navigateur actif
-→ audio OPS → navigateur
-→ audio navigateur → OPS
-→ interface affiche l'appel en cours.
-
-## 2. ENREGISTREMENT MANUEL : FAUCUN ENREGISTREMENT
-
-Le problème précédent concernant l'absence de fichier encore n'est pas corrigé :
-
-Il faut donc vérifier toute la chaîne audio.
-
-Analyse :
-
-Asterisk
-→ channels
-→ bridge
-→ flux RTP/audio
-→ MixMonitor / Record
-→ fichier WAV
-→ volume Docker
-→ dossier recording du backend.
-etc..
-
-Vérifie particulièrement :
-
-- à quel moment l'enregistrement est démarré ;
-- si l'enregistrement est attaché au bon channel ou au bridge ;
-- si le bridge contient réellement les deux channels ;
-- si le média audio circule réellement entre les deux participants ;
-- si MixMonitor reçoit effectivement de l'audio ;
-- si l'enregistrement est arrêté correctement après le hangup ;
-- si le fichier est fermé/finalisé correctement ;
-- les permissions du répertoire ;
-- le montage du volume Docker ;
-- le format WAV utilisé ;
-- la configuration RTP/codec ;
-- les logs Asterisk pendant l'appel.
+- tout le dossier `/info`
+- les documents d'architecture et de conception disponibles
+- le schéma réel de la BDD
+- les entités JPA et repositories
+- les migrations
+- les règles métier
+- le moteur de règles
+- le moteur de routage
+- les seeds/configurations par défaut
+- les use cases
+- les événements et traitements asynchrones
+- les notifications
+- Kafka
+- Email/Mailpit
+- VoIP/Asterisk
+- SIP.js/WebRTC
+- ElevenLabs/TTS
+- Docker Compose
+- configuration Spring
+- frontend React
+- API REST
+- sécurité/Keycloak
+- tests existants.
 
 IMPORTANT :
-Ne considère PAS qu'un fichier créé signifie que l'enregistrement fonctionne.
 
-Je veux un test réel où :
-- le superviseur parle ;
-- l'OPS répond ;
-- les deux parlent réellement pendant plusieurs secondes ;
-- le superviseur raccroche ;
-- le fichier final est généré ;
-- sa taille est supérieure à 50 octets ;
-- le fichier contient réellement la conversation audio.
+La partie VoIP a été récemment modifiée et testée avec Antigravity après les derniers travaux effectués avec Cursor.
 
-Vérifie également que l'enregistrement contient bien les deux directions audio (superviseur → OPS et OPS → superviseur), et pas seulement une direction.
+Tu dois donc considérer que **le code actuellement présent dans le workspace est la source de vérité**, même si certaines décisions diffèrent de celles que tu aurais pu connaître précédemment.
 
-## 3. VÉRIFIER LE FLUX AUDIO WEBRTC
+Analyse particulièrement toute la partie VoIP actuelle avant de la modifier.
 
-Comme le superviseur doit parler depuis le navigateur, vérifie que :
+Ne réimplémente pas quelque chose qui existe déjà.
 
-Browser microphone
-→ WebRTC/SIP.js
-→ WSS
-→ Asterisk/PJSIP
-→ bridge
-→ MicroSIP
+---
 
-et dans l'autre sens :
+# 2. RÈGLE DE TRAVAIL
+
+Pour chaque problème :
+
+1. reproduire ou analyser le problème ;
+2. identifier la cause réelle ;
+3. vérifier les dépendances avec les autres modules ;
+4. déterminer la correction architecturale appropriée ;
+5. implémenter la correction ;
+6. ajouter/corriger les tests nécessaires ;
+7. tester réellement ;
+8. vérifier que les fonctionnalités déjà fonctionnelles ne sont pas cassées.
+
+Ne fais pas de simple correction superficielle.
+
+Si mon diagnostic est techniquement incorrect, ne le suis pas aveuglément.
+
+Tu as la liberté de modifier la conception ou l'implémentation lorsqu'une autre approche est techniquement meilleure, MAIS :
+
+- ne change pas inutilement l'architecture ;
+- ne supprime pas une fonctionnalité existante sans raison ;
+- conserve les principes métier du projet ;
+- explique toute modification importante de conception ;
+- privilégie une solution réellement exploitable en production.
+
+---
+
+# PR1 — FIN D'APPEL VOIP SYNCHRONISÉE
+
+Il existe un problème avec les appels manuels du superviseur.
+
+Actuellement :
+
+- superviseur raccroche depuis le navigateur → l'appel est correctement terminé chez l'OPS ;
+- mais si l'OPS raccroche depuis MicroSIP → l'application du superviseur peut rester dans l'état "appel en cours" ;
+- l'enregistrement peut également continuer alors que l'appel est terminé.
+
+Corrige toute la chaîne :
 
 MicroSIP
-→ RTP
 → Asterisk
-→ WebRTC
-→ navigateur.
+→ ARI/events
+→ backend
+→ WebSocket/frontend
+→ SIP.js
+→ interface superviseur
+→ enregistrement.
 
-Il faut confirmer que les deux flux audio existent réellement.
+Le système doit avoir une véritable synchronisation bidirectionnelle.
 
-Si nécessaire, utilise les outils CLI Asterisk et les logs pour vérifier les channels, le bridge, les codecs et le RTP.
+Cas obligatoire :
 
-## 4. NE PAS FAIRE UNE SIMULATION
+### Superviseur raccroche
 
-Je ne veux aucune correction purement visuelle.
+Navigateur
+→ SIP.js
+→ Asterisk
+→ MicroSIP raccroché
+→ bridge détruit
+→ recording arrêté
+→ session clôturée
+→ frontend idle.
 
-Le système doit fonctionner réellement avec :
+### OPS raccroche
 
-- navigateur superviseur ;
-- microphone réel ;
-- SIP.js/WebRTC ;
+MicroSIP
+→ Asterisk détecte le hangup
+→ bridge détruit
+→ recording arrêté
+→ backend met à jour la session
+→ événement frontend
+→ navigateur revient automatiquement à l'état idle.
+
+Ne fais pas simplement un refresh frontend.
+
+---
+
+# PR2 — ESCALADE ET VALIDATION DES ÉTAPES DE ROUTAGE
+
+C'est un problème majeur.
+
+Le moteur de routage peut définir par exemple :
+
+Étape 1 :
+TAM → appel
+
+Si aucune prise en charge :
+attendre 5 minutes
+
+Étape 2 :
+Admin technique → appel
+
+Puis éventuellement :
+
+Étape 3 :
+responsable/périmètre supérieur
+
+etc.
+
+Le problème actuel est que l'escalade semble continuer même lorsque la première personne a répondu.
+
+Exemple :
+
+TAM répond à l'appel.
+
+Malgré cela :
+
+5 minutes plus tard → étape 2 déclenchée.
+
+C'est incorrect.
+
+Il faut analyser précisément la notion de :
+
+- appel déclenché ;
+- appel sonné ;
+- appel répondu ;
+- appel refusé ;
+- appel manqué ;
+- appel impossible ;
+- appel terminé ;
+- notification envoyée ;
+- notification prise en charge ;
+- incident résolu.
+
+Attention :
+
+"appel répondu" ne signifie pas forcément que l'incident est résolu.
+
+Analyse donc le modèle métier existant et ne mélange pas :
+
+- notification envoyée ;
+- notification reçue ;
+- notification acceptée/pris en charge ;
+- incident résolu.
+
+Pour les appels VoIP, la réponse réelle de l'OPS doit pouvoir être utilisée comme événement de prise en charge selon la logique métier prévue.
+
+Pour Email/SMS/Kafka, ne suppose pas qu'une réponse téléphonique existe.
+
+Il faut déterminer comment le système doit décider de continuer ou d'arrêter l'escalade selon les mécanismes réellement disponibles.
+
+Analyse également :
+
+- scheduler ;
+- délais ;
+- conditions ;
+- statut des notifications ;
+- événements ;
+- concurrence ;
+- idempotence ;
+- retries ;
+- escalade déjà déclenchée ;
+- conditions de résolution Dynatrace.
+
+Corrige l'architecture si nécessaire.
+
+---
+
+# PR3 — PAGINATION ET ACTUALISATION DES DONNÉES
+
+Le frontend contient actuellement des listes qui peuvent devenir importantes.
+
+Identifier toutes les pages concernées et ajouter une vraie pagination côté backend/frontend lorsque nécessaire.
+
+Ne pas simplement charger plusieurs centaines/milliers d'enregistrements dans le navigateur.
+
+Identifier également les données qui doivent être actualisées après :
+
+- création ;
+- modification ;
+- suppression ;
+- traitement d'une alerte ;
+- changement de statut ;
+- notification ;
+- appel VoIP ;
+- prise en charge ;
+- escalade.
+
+Le frontend ne doit pas rester avec des données obsolètes jusqu'à un refresh manuel lorsque cela n'est pas nécessaire.
+
+Utilise une stratégie cohérente avec l'architecture actuelle :
+refetch ciblé, invalidation, polling ou événements temps réel selon le cas.
+
+---
+
+# PR4 — JOURNALISATION ET INFORMATIONS DESTINATAIRES
+
+Les logs existent déjà mais certaines informations sont trop techniques.
+
+Exemple actuel :
+
+- extension SIP ;
+- numéro ;
+- cause = null ;
+- SIP status = ANSWERED/HANGUP/FAILED.
+
+Il faut produire une journalisation compréhensible.
+
+Au lieu d'afficher uniquement des variables brutes, construire une description métier claire.
+
+Exemple de principe :
+
+"Appel VoIP vers Ahmed X (Admin technique — Solution Y) répondu après 12 secondes."
+
+ou :
+
+"Appel VoIP vers Ahmed X échoué : le destinataire n'était pas joignable."
+
+Le champ `cause` est actuellement souvent `null`.
+
+Diagnostiquer pourquoi.
+
+Ne pas simplement remplacer `null` par une chaîne arbitraire.
+
+Déterminer les véritables causes disponibles depuis :
+
 - Asterisk ;
-- MicroSIP ;
-- bridge audio bidirectionnel ;
-- enregistrement audio réel.
+- SIP ;
+- backend ;
+- exceptions ;
+- timeout ;
+- absence de registration ;
+- hangup ;
+- busy ;
+- failed ;
+- no answer.
 
-## 5. TEST FINAL OBLIGATOIRE
+Associer également les informations métier du destinataire :
 
-Après correction, réalise ou vérifie ce scénario complet :
+- nom ;
+- rôle ;
+- solution ;
+- téléphone ;
+- extension si pertinente.
 
-1. SUPERVISEUR se connecte au téléphone VoIP depuis le navigateur.
-2. Le navigateur obtient l'autorisation microphone.
-3. SUPERVISEUR déclenche un appel manuel.
-4. MicroSIP OPS sonne.
-5. OPS répond.
-6. Le navigateur ne plante pas.
-7. Le bridge audio est établi.
-8. SUPERVISEUR parle depuis le navigateur.
-9. OPS répond depuis MicroSIP.
-10. Les deux entendent réellement leur interlocuteur.
-11. L'appel est enregistré.
-12. SUPERVISEUR raccroche.
-13. OPS est également déconnecté.
-14. L'enregistrement est finalisé.
-15. Le fichier n'est pas vide.
-16. Vérifier sa taille et, si possible, sa durée.
-17. Vérifier que l'enregistrement contient réellement de l'audio.
-18. Vérifier que la session VoIP est correctement clôturée en base.
+Les logs doivent rester exploitables pour l'audit.
 
-Si un test échoue, continue l'analyse jusqu'à identifier la cause réelle au lieu de considérer le bloc comme terminé.
+---
 
-À la fin, donne-moi clairement :
+# PR5 — STATISTIQUES ET DASHBOARD
 
-- la cause exacte du crash frontend ;
-- la correction appliquée ;
-- la cause exacte des fichiers 0 octet ;
-- la correction appliquée pour l'enregistrement ;
-- les fichiers modifiés ;
-- les tests réellement effectués ;
-- la taille et la durée d'un fichier d'enregistrement valide ;
-- l'état final du scénario complet.
+Le dashboard actuel est insuffisant.
 
-Ne modifie pas inutilement les autres fonctionnalités du projet.
+Cette partie doit être traitée sérieusement.
+
+Analyser les données réellement disponibles en BDD et proposer des KPIs pertinents.
+
+Focus particulier sur VoIP.
+
+Je veux pouvoir analyser notamment :
+
+### Alertes
+
+- nombre total ;
+- nouvelles ;
+- traitées ;
+- non traitées ;
+- résolues ;
+- non résolues ;
+- par criticité ;
+- par statut ;
+- par solution ;
+- par domaine/pôle/entité lorsque disponible ;
+- évolution dans le temps.
+
+### Notifications
+
+- email envoyés ;
+- SMS envoyés ;
+- appels déclenchés ;
+- succès ;
+- échecs ;
+- timeouts ;
+- retries ;
+- escalades.
+
+### VoIP
+
+- nombre d'appels ;
+- appels répondus ;
+- appels manqués ;
+- appels refusés ;
+- appels échoués ;
+- appels vers destinataire non joignable ;
+- durée moyenne ;
+- durée maximale/minimale ;
+- temps moyen avant réponse ;
+- taux de réponse ;
+- taux d'échec ;
+- taux de non-réponse ;
+- nombre d'escalades déclenchées ;
+- nombre d'escalades évitées parce qu'un destinataire a répondu ;
+- disponibilité des destinataires ;
+- dernière activité/contact ;
+- statistiques par personne ;
+- statistiques par rôle ;
+- statistiques par solution.
+
+Les statistiques doivent être calculées à partir des données réelles.
+
+Ne crée pas de fausses statistiques uniquement pour enrichir visuellement le dashboard.
+
+Si certaines statistiques ne sont pas calculables avec le modèle actuel, identifie les données manquantes et ajoute proprement les éléments nécessaires.
+
+---
+
+# PR6 — COHÉRENCE ENTRE ALERTES, CONTACTS ET DISPONIBILITÉ
+
+Il existe plusieurs incohérences.
+
+Par exemple :
+
+- "Dernier contact" reste vide après un contact ;
+- les compteurs succès/échec VoIP peuvent être incohérents ;
+- un destinataire non joignable peut encore être appelé ;
+- l'état de disponibilité n'est pas correctement pris en compte.
+
+Analyser le cycle de vie réel d'un destinataire.
+
+Un utilisateur marqué comme non joignable/hors service ne doit pas être automatiquement appelé comme s'il était disponible.
+
+Mais attention :
+
+ne mélange pas :
+
+"destinataire SIP non joignable"
+
+avec :
+
+"destinataire a répondu mais n'a pas réellement traité l'incident".
+
+Ce sont deux situations métier différentes.
+
+Le système doit distinguer :
+
+- disponible ;
+- non enregistré ;
+- occupé ;
+- non joignable ;
+- timeout ;
+- appel répondu ;
+- appel refusé ;
+- appel terminé ;
+- prise en charge ;
+- incident résolu.
+
+Vérifier également les mises à jour de :
+
+- dernier contact ;
+- dernier appel ;
+- dernier succès ;
+- dernier échec ;
+- compteurs ;
+- statut de notification ;
+- historique.
+
+---
+
+# PR7 — PAGES PARAMÈTRES / PROFIL / VOIP
+
+Les pages :
+
+- Paramètres ;
+- Profil ;
+- Téléphone VoIP
+
+sont actuellement pauvres.
+
+Analyser leur utilité réelle.
+
+IMPORTANT :
+
+Le superviseur est celui qui déclenche les appels manuels.
+
+La page "Téléphone VoIP" ne doit pas devenir une page inutile permettant simplement de simuler un téléphone.
+
+Si le téléphone VoIP peut être intégré directement dans l'expérience du superviseur pendant le traitement d'une alerte/appel manuel, privilégier cette approche.
+
+Pour l'OPS, ne conserver une fonctionnalité VoIP que si elle possède une vraie utilité métier.
+
+Sinon supprimer ou intégrer cette fonctionnalité dans une interface plus cohérente.
+
+Enrichir Profil et Paramètres avec des informations réellement utiles.
+
+Si deux pages sont artificiellement pauvres, il est acceptable de les fusionner si cela améliore réellement l'UX.
+
+---
+
+# PR8 — ALERTES PAR UTILISATEUR ET TRAITEMENT SUPERVISEUR
+
+L'interface actuelle doit mieux distinguer les alertes nécessitant une intervention.
+
+Je préfère éviter de multiplier inutilement les pages.
+
+Analyser la possibilité de conserver :
+
+- une page "Alertes" ;
+- une page "Historique" uniquement si elle apporte réellement une différence utile.
+
+Les filtres doivent permettre notamment :
+
+- mes alertes ;
+- alertes à traiter ;
+- alertes traitées par moi ;
+- alertes non prises en charge ;
+- alertes escaladées ;
+- alertes résolues ;
+- période ;
+- criticité ;
+- solution ;
+- statut.
+
+### Superviseur
+
+Le superviseur doit pouvoir identifier rapidement une alerte nécessitant une intervention manuelle.
+
+Depuis le détail d'une alerte, il doit pouvoir voir les responsables pertinents.
+
+Par exemple :
+
+- TAM de la solution ;
+- administrateur technique de la solution ;
+- responsable du domaine ;
+- responsable du pôle ;
+- responsable de l'entité ;
+
+uniquement lorsque ces informations existent réellement dans le référentiel.
+
+Le superviseur ne devrait pas devoir parcourir une liste globale de centaines de personnes pour trouver le responsable d'une alerte.
+
+Depuis le détail de l'alerte, il doit pouvoir déclencher l'appel manuel vers le ou les destinataires pertinents selon la logique métier.
+
+Analyser la meilleure UX :
+
+bouton,
+action,
+popup,
+liste des responsables,
+etc.
+
+### OPS
+
+L'OPS doit également pouvoir consulter clairement les alertes qui lui sont affectées ou qui le concernent.
+
+Afficher leur état :
+
+- affectée ;
+- notification reçue ;
+- prise en charge ;
+- escaladée ;
+- résolue ;
+- etc.
+
+Ne crée pas des pages supplémentaires si des filtres ou une vue adaptée permettent de résoudre proprement le problème.
+
+---
+
+# PR9 — MODÈLE ORGANISATIONNEL ET ROUTAGE
+
+Il existe actuellement une confusion dans le moteur de routage.
+
+La hiérarchie métier doit être respectée.
+
+Un TAM est lié à une SOLUTION.
+
+Il ne doit pas être considéré comme un manager de domaine.
+
+Commencer avec les niveaux réellement nécessaires au routage actuel :
+
+- TAM de solution ;
+- administrateur technique de solution.
+
+Puis permettre l'escalade vers les niveaux supérieurs lorsque la conception métier le prévoit :
+
+- responsable domaine ;
+- responsable pôle ;
+- responsable entité.
+
+Attention aux solutions qui n'ont :
+
+- pas de TAM ;
+- pas d'administrateur technique ;
+- ou une information organisationnelle manquante.
+
+Le moteur doit gérer proprement ces cas.
+
+Ne suppose pas que toutes les solutions possèdent tous les responsables.
+
+Également :
+
+- remplacer "directeur d'entité" par "responsable d'entité" ;
+- vérifier les libellés sensibles au cas/casse ;
+- analyser pourquoi la sélection de certains niveaux organisationnels provoque actuellement une erreur HTTP 500 lors de la sauvegarde ;
+- corriger la cause réelle.
+
+Analyser également la nécessité du champ qui détermine séparément le niveau organisationnel du destinataire.
+
+S'il est redondant avec le rôle/type de destinataire et la relation à la solution, ne conserver qu'un modèle cohérent.
+
+Ne supprime pas ce champ uniquement parce qu'il semble redondant : vérifie d'abord son utilisation dans le moteur de routage, les règles, la BDD et le frontend.
+
+---
+
+# PR10 — DIAGNOSTIC COMPLET DU MOTEUR D'ESCALADE
+
+Cette partie est prioritaire.
+
+Fais une analyse approfondie de tout le mécanisme :
+
+Routing
+→ Notification
+→ attente
+→ vérification condition
+→ décision d'escalade
+→ prochaine étape
+→ résolution.
+
+Vérifie :
+
+- modèle de données ;
+- règles ;
+- conditions ;
+- délais ;
+- scheduler ;
+- événements ;
+- statuts ;
+- transactions ;
+- concurrence ;
+- retries ;
+- idempotence ;
+- résolution Dynatrace ;
+- appels VoIP ;
+- Email ;
+- Kafka/SMS ;
+- historique ;
+- audit.
+
+La condition d'escalade doit être réellement évaluée.
+
+Ne déclenche jamais automatiquement l'étape suivante simplement parce que le délai est écoulé si la condition d'escalade n'est plus vraie.
+
+Exemple :
+
+Étape 1 → appel TAM.
+
+Si TAM répond :
+
+→ enregistrer l'événement de prise en charge selon la logique métier
+→ arrêter l'escalade.
+
+Si TAM ne répond pas :
+
+→ attendre le délai configuré
+→ vérifier l'état réel
+→ si condition toujours vraie → étape suivante.
+
+Si l'alerte Dynatrace est résolue :
+
+→ arrêter l'escalade.
+
+Le délai de vérification ne doit pas être arbitraire.
+
+Il doit provenir de la configuration métier existante ou être explicitement configurable.
+
+Analyse le fonctionnement actuel de la vérification Dynatrace et conserve l'API appropriée déjà prévue par le projet.
+
+---
+
+# 3. CONTRAINTE IMPORTANTE : NE PAS CASSER CE QUI FONCTIONNE
+
+Avant chaque modification importante, identifie les fonctionnalités dépendantes.
+
+En particulier :
+
+- ingestion Dynatrace ;
+- classification ;
+- business rules ;
+- routing ;
+- email ;
+- Kafka SMS ;
+- appels VoIP automatiques ;
+- TTS ElevenLabs ;
+- Keycloak ;
+- Docker ;
+- persistence ;
+- frontend existant.
+
+La partie VoIP automatique fonctionne déjà.
+
+Ne la casse pas en corrigeant les appels manuels.
+
+---
+
+# 4. TESTS
+
+Pour chaque PR corrigée, ajoute ou adapte les tests nécessaires.
+
+Au minimum, tester :
+
+- appel répondu ;
+- appel non répondu ;
+- appel refusé ;
+- appel échoué ;
+- appel interrompu par OPS ;
+- appel interrompu par superviseur ;
+- enregistrement finalisé ;
+- escalade arrêtée après prise en charge ;
+- escalade poursuivie après absence de réponse ;
+- escalade arrêtée après résolution ;
+- destinataire non joignable ;
+- absence de TAM ;
+- absence d'admin technique ;
+- changement de statut ;
+- pagination ;
+- statistiques.
+
+Pour les parties VoIP, lorsque l'environnement Docker est disponible, effectuer de vrais tests avec Asterisk et les composants existants.
+
+---
+
+# 5. ORDRE DE TRAVAIL
+
+Ne modifie pas immédiatement les 10 PR.
+
+Commence par :
+
+1. analyse complète ;
+2. diagnostic des dépendances ;
+3. PR1 + PR2 + PR10 en priorité ;
+4. PR4 + PR6 ;
+5. PR3 + PR5 ;
+6. PR8 + PR9 ;
+7. PR7 ;
+8. tests globaux ;
+9. frontend final ;
+10. vérification complète.
+
+Tu peux changer cet ordre si ton analyse montre qu'une autre dépendance doit être traitée avant.
+
+---
+
+# 6. GIT
+
+Crée un commit Git après chaque bloc fonctionnel important et stable.
+
+Exemples :
+
+- `fix(voip): synchronize manual call termination`
+- `fix(routing): correct escalation conditions`
+- `fix(audit): improve notification event descriptions`
+- `feat(dashboard): add operational and voip statistics`
+- `fix(alerts): synchronize contact and availability state`
+- `feat(frontend): improve alert treatment workflow`
+
+Ne crée pas un commit pour chaque petit fichier.
+
+Chaque commit doit représenter une étape cohérente et testée.
+
+Avant chaque commit :
+
+- vérifier `git diff` ;
+- vérifier les tests ;
+- vérifier qu'aucune clé API ou donnée sensible n'est présente ;
+- vérifier `git status`.
+
+---
+
+# 7. RÈGLE FINALE
+
+Tu n'es pas obligé de suivre littéralement mes propositions techniques.
+
+Mes PR décrivent surtout les problèmes et les objectifs fonctionnels.
+
+Si tu trouves une meilleure conception :
+
+→ utilise-la.
+
+Si une partie de ma demande est contradictoire avec l'architecture réelle :
+
+→ signale-le et choisis la solution techniquement correcte.
+
+Si une fonctionnalité existe déjà sous une autre forme :
+
+→ réutilise-la plutôt que de créer un doublon.
+
+Si une modification BDD est nécessaire :
+
+→ utilise les migrations appropriées.
+
+Si une modification Asterisk est nécessaire :
+
+→ vérifie d'abord son impact sur les appels automatiques.
+
+Si une modification frontend est nécessaire :
+
+→ garde le frontend cohérent avec les API backend existantes.
+
+OBJECTIF FINAL :
+
+Obtenir une version AlertOps réellement fonctionnelle et cohérente, et non simplement une interface qui donne l'impression que les fonctionnalités existent.
+
+À la fin, fournis :
+
+1. diagnostic de chaque PR ;
+2. cause réelle trouvée ;
+3. correction appliquée ;
+4. architecture modifiée éventuellement ;
+5. fichiers modifiés ;
+6. tests réalisés ;
+7. résultats des tests ;
+8. problèmes restant éventuellement ;
+9. commits créés.}

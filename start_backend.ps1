@@ -1,0 +1,5 @@
+$env:GEMINI_API_KEY="AQ.Ab8RN6K21zCjS-yBYQVoyie_Fhvm5Tq-EeWbzYPq6tOrGY5Elg"
+$env:GEMINI_MODEL="gemini-3.5-flash"
+$env:ELEVENLABS_API_KEY="sk_39383fc4aa39464e93e67f4238155c0a4abe0517850023ec"
+$env:ELEVENLABS_VOICE_ID="JBFqnCBsd6RMkjVDRZzb"
+java -jar "c:\Users\DELL\Desktop\PFA\gestion_alertes\target\PFA-0.0.1-SNAPSHOT.war"

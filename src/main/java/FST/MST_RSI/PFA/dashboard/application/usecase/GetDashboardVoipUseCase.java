@@ -25,7 +25,9 @@ public class GetDashboardVoipUseCase {
                 to,
                 repository.fetchVoipSummary(from, to),
                 repository.fetchRecentVoipCalls(from, to, RECENT_CALLS_LIMIT),
-                repository.fetchVoipByEscalationStep(from, to)
+                repository.fetchVoipByEscalationStep(from, to),
+                repository.fetchVoipByRole(from, to),
+                repository.fetchVoipBySolution(from, to)
         );
     }
 }

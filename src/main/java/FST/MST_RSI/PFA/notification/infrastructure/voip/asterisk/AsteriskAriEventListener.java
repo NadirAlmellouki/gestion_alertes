@@ -156,7 +156,7 @@ public class AsteriskAriEventListener extends TextWebSocketHandler {
                     ariClient.hangup(channelId);
                 }
             }
-            case "ChannelDestroyed", "ChannelHangupRequest" -> onHangup(channel, channelId);
+            case "ChannelDestroyed", "ChannelHangupRequest" -> onHangup(event, channel, channelId);
             default -> {
             }
         }
@@ -248,15 +248,16 @@ public class AsteriskAriEventListener extends TextWebSocketHandler {
         }
     }
 
-    private void onHangup(JsonNode channel, String channelId) {
-        Integer cause = extractCause(channel, channelId);
+    private void onHangup(JsonNode event, JsonNode channel, String channelId) {
+        Integer cause = extractCause(event, channel, channelId);
+        String causeTxt = extractCauseText(event, channel);
         String sessionId = resolveSessionId(channelId);
         String hangupSource = hangupSource(sessionId, channelId);
         teardownSession(sessionId, channelId, hangupSource);
 
         boolean wasAnswered = Boolean.TRUE.equals(answered.get(channelId));
         VoiceCallOutcome outcome = SipHangupCauseMapper.fromCause(cause, wasAnswered);
-        applyVoiceCallOutcomeUseCase.finished(channelId, outcome, cause, hangupSource);
+        applyVoiceCallOutcomeUseCase.finished(channelId, outcome, cause, hangupSource, causeTxt);
         answered.remove(channelId);
         sounds.remove(channelId);
         live.remove(channelId);
@@ -346,7 +347,13 @@ public class AsteriskAriEventListener extends TextWebSocketHandler {
         return "UNKNOWN";
     }
 
-    private Integer extractCause(JsonNode channel, String channelId) {
+    private Integer extractCause(JsonNode event, JsonNode channel, String channelId) {
+        if (event != null && event.has("cause") && event.path("cause").canConvertToInt()) {
+            return event.path("cause").asInt();
+        }
+        if (event != null && event.has("hangup_cause") && event.path("hangup_cause").canConvertToInt()) {
+            return event.path("hangup_cause").asInt();
+        }
         if (channel.has("hangup_cause") && channel.path("hangup_cause").canConvertToInt()) {
             return channel.path("hangup_cause").asInt();
         }
@@ -356,6 +363,17 @@ public class AsteriskAriEventListener extends TextWebSocketHandler {
         return sessionRepository.findByAnyChannelId(channelId)
                 .map(VoiceCallSessionEntity::getHangupCause)
                 .orElse(null);
+    }
+
+    private static String extractCauseText(JsonNode event, JsonNode channel) {
+        String txt = event != null ? event.path("cause_txt").asText(null) : null;
+        if (txt == null || txt.isBlank()) {
+            txt = channel.path("cause_txt").asText(null);
+        }
+        if (txt == null || txt.isBlank()) {
+            txt = channel.path("hangup_cause_txt").asText(null);
+        }
+        return txt != null && !txt.isBlank() ? txt : null;
     }
 
     private static Map<String, String> parseArgs(String args) {

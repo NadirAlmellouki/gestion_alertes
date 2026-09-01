@@ -9,6 +9,8 @@ import FST.MST_RSI.PFA.dashboard.application.dto.NotificationKpiDto;
 import FST.MST_RSI.PFA.dashboard.application.dto.ResolutionKpiDto;
 import FST.MST_RSI.PFA.dashboard.application.dto.RoutingKpiDto;
 import FST.MST_RSI.PFA.dashboard.application.dto.TimeSeriesPointDto;
+import FST.MST_RSI.PFA.dashboard.application.dto.VoipByRoleDto;
+import FST.MST_RSI.PFA.dashboard.application.dto.VoipBySolutionDto;
 import FST.MST_RSI.PFA.dashboard.application.dto.VoipCallDto;
 import FST.MST_RSI.PFA.dashboard.application.dto.VoipSummaryDto;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -327,6 +329,65 @@ public class DashboardProjectionRepository {
     }
 
     public VoipSummaryDto fetchVoipSummary(Instant from, Instant to) {
+        // Query from voice_call_session for rich metrics
+        List<VoipSummaryDto> results = jdbcTemplate.query(
+                """
+                SELECT COUNT(*) AS total,
+                       SUM(CASE WHEN answered_at IS NOT NULL OR outcome = 'ANSWERED' OR outcome = 'HANGUP' THEN 1 ELSE 0 END) AS answered,
+                       SUM(CASE WHEN outcome = 'NO_ANSWER' THEN 1 ELSE 0 END) AS no_answer,
+                       SUM(CASE WHEN outcome = 'REJECTED' THEN 1 ELSE 0 END) AS rejected,
+                       SUM(CASE WHEN outcome = 'BUSY' THEN 1 ELSE 0 END) AS busy,
+                       SUM(CASE WHEN outcome = 'FAILED' OR outcome = 'UNREACHABLE' OR outcome = 'UNREGISTERED' THEN 1 ELSE 0 END) AS failed,
+                       AVG(CASE WHEN answered_at IS NOT NULL AND duration_seconds IS NOT NULL THEN duration_seconds END) AS avg_duration,
+                       MIN(CASE WHEN answered_at IS NOT NULL AND duration_seconds > 0 THEN duration_seconds END) AS min_duration,
+                       MAX(CASE WHEN answered_at IS NOT NULL THEN duration_seconds END) AS max_duration,
+                       AVG(CASE WHEN answered_at IS NOT NULL AND started_at IS NOT NULL THEN EXTRACT(EPOCH FROM (answered_at - started_at)) END) AS avg_ring_time,
+                       SUM(CASE WHEN live_conversation = TRUE THEN 1 ELSE 0 END) AS manual_calls,
+                       SUM(CASE WHEN live_conversation IS NOT TRUE THEN 1 ELSE 0 END) AS auto_calls
+                FROM voice_call_session
+                WHERE started_at >= ? AND started_at < ?
+                """,
+                (rs, rowNum) -> {
+                    long total = rs.getLong("total");
+                    long answered = rs.getLong("answered");
+                    long noAnswer = rs.getLong("no_answer");
+                    long rejected = rs.getLong("rejected");
+                    long busy = rs.getLong("busy");
+                    long failed = rs.getLong("failed");
+                    double responseRate = total > 0 ? Math.round((double) answered / total * 1000.0) / 10.0 : 0.0;
+                    double failureRate = total > 0 ? Math.round((double) failed / total * 1000.0) / 10.0 : 0.0;
+                    Double avgDuration = rs.getObject("avg_duration") != null ? Math.round(rs.getDouble("avg_duration") * 10.0) / 10.0 : null;
+                    Integer minDuration = rs.getObject("min_duration") != null ? rs.getInt("min_duration") : null;
+                    Integer maxDuration = rs.getObject("max_duration") != null ? rs.getInt("max_duration") : null;
+                    Double avgRingTime = rs.getObject("avg_ring_time") != null ? Math.round(rs.getDouble("avg_ring_time") * 10.0) / 10.0 : null;
+                    long manual = rs.getLong("manual_calls");
+                    long auto = rs.getLong("auto_calls");
+
+                    return new VoipSummaryDto(
+                            total,
+                            answered,
+                            noAnswer,
+                            rejected,
+                            busy,
+                            failed,
+                            responseRate,
+                            failureRate,
+                            avgDuration,
+                            minDuration,
+                            maxDuration,
+                            avgRingTime,
+                            manual,
+                            auto
+                    );
+                },
+                ts(from), ts(to)
+        );
+
+        if (!results.isEmpty() && results.getFirst().total() > 0) {
+            return results.getFirst();
+        }
+
+        // Fallback to notification table if no session entries exist in time range
         Map<String, Long> counts = new HashMap<>();
         jdbcTemplate.query(
                 """
@@ -342,55 +403,122 @@ public class DashboardProjectionRepository {
                 ts(from), ts(to)
         );
 
-        long sent = counts.getOrDefault("SENT", 0L);
+        long sent = counts.getOrDefault("SENT", 0L) + counts.getOrDefault("ACKNOWLEDGED", 0L);
         long failed = counts.getOrDefault("FAILED", 0L);
         long deferred = counts.getOrDefault("DEFERRED", 0L);
-        long pending = counts.getOrDefault("PENDING", 0L);
-        long total = sent + failed + deferred + pending + counts.getOrDefault("SKIPPED", 0L);
+        long total = sent + failed + deferred + counts.getOrDefault("PENDING", 0L) + counts.getOrDefault("SKIPPED", 0L);
 
-        return new VoipSummaryDto(total, sent, failed, deferred, pending);
+        return new VoipSummaryDto(total, sent, failed, deferred, counts.getOrDefault("PENDING", 0L));
     }
 
     public List<VoipCallDto> fetchRecentVoipCalls(Instant from, Instant to, int limit) {
         return jdbcTemplate.query(
                 """
-                SELECT n.id AS notification_id,
-                       n.alert_id,
-                       n.notification_status,
-                       n.created_at,
-                       nr.destination,
-                       p.full_name AS person_name,
+                SELECT vcs.id AS session_id,
+                       vcs.notification_id,
+                       vcs.alert_id,
+                       vcs.outcome,
+                       vcs.duration_seconds,
+                       vcs.live_conversation AS live_mode,
+                       vcs.hangup_source,
+                       vcs.failure_reason,
+                       vcs.started_at,
+                       vcs.extension,
+                       COALESCE(p.full_name, 'Destinataire') AS person_name,
                        re.current_step AS escalation_step
-                FROM notification n
-                LEFT JOIN notification_recipient nr ON nr.notification_id = n.id
-                LEFT JOIN person p ON p.id = nr.person_id
-                LEFT JOIN routing_execution re ON re.id = n.routing_execution_id
-                WHERE n.notification_type = 'VOIP'
-                  AND n.created_at >= ? AND n.created_at < ?
-                ORDER BY n.created_at DESC
+                FROM voice_call_session vcs
+                LEFT JOIN person p ON p.id = vcs.person_id
+                LEFT JOIN notification n ON n.id = vcs.notification_id
+                LEFT JOIN routing_execution re ON re.id = COALESCE(vcs.routing_execution_id, n.routing_execution_id)
+                WHERE vcs.started_at >= ? AND vcs.started_at < ?
+                ORDER BY vcs.started_at DESC
                 LIMIT ?
                 """,
                 (rs, rowNum) -> new VoipCallDto(
-                        rs.getObject("notification_id", UUID.class).toString(),
-                        rs.getObject("alert_id", UUID.class).toString(),
+                        rs.getObject("notification_id") != null ? rs.getObject("notification_id", UUID.class).toString() : rs.getObject("session_id", UUID.class).toString(),
+                        rs.getObject("alert_id") != null ? rs.getObject("alert_id", UUID.class).toString() : null,
                         rs.getString("person_name"),
-                        rs.getString("destination"),
-                        rs.getString("notification_status"),
-                        toInstant(rs.getTimestamp("created_at")),
-                        rs.getObject("escalation_step") != null ? rs.getInt("escalation_step") : null
+                        rs.getString("extension") != null ? rs.getString("extension") : "SIP",
+                        rs.getString("outcome"),
+                        toInstant(rs.getTimestamp("started_at")),
+                        rs.getObject("escalation_step") != null ? rs.getInt("escalation_step") : 1,
+                        rs.getString("outcome"),
+                        rs.getObject("duration_seconds") != null ? rs.getInt("duration_seconds") : null,
+                        rs.getBoolean("live_mode"),
+                        rs.getString("hangup_source"),
+                        rs.getString("failure_reason")
                 ),
                 ts(from), ts(to), limit
+        );
+    }
+
+    public List<VoipByRoleDto> fetchVoipByRole(Instant from, Instant to) {
+        return jdbcTemplate.query(
+                """
+                SELECT COALESCE(uaa.role, 'NON_ASSIGNE') AS role,
+                       COUNT(vcs.id) AS total_calls,
+                       SUM(CASE WHEN vcs.answered_at IS NOT NULL OR vcs.outcome = 'ANSWERED' OR vcs.outcome = 'HANGUP' THEN 1 ELSE 0 END) AS answered_calls,
+                       AVG(CASE WHEN vcs.answered_at IS NOT NULL AND vcs.duration_seconds IS NOT NULL THEN vcs.duration_seconds END) AS avg_duration
+                FROM voice_call_session vcs
+                LEFT JOIN unit_admin_assignment uaa ON uaa.person_id = vcs.person_id AND uaa.active = TRUE
+                WHERE vcs.started_at >= ? AND vcs.started_at < ?
+                GROUP BY COALESCE(uaa.role, 'NON_ASSIGNE')
+                ORDER BY total_calls DESC
+                """,
+                (rs, rowNum) -> {
+                    long total = rs.getLong("total_calls");
+                    long answered = rs.getLong("answered_calls");
+                    double responseRate = total > 0 ? Math.round((double) answered / total * 1000.0) / 10.0 : 0.0;
+                    Double avgDuration = rs.getObject("avg_duration") != null ? Math.round(rs.getDouble("avg_duration") * 10.0) / 10.0 : null;
+                    return new VoipByRoleDto(
+                            rs.getString("role"),
+                            total,
+                            answered,
+                            responseRate,
+                            avgDuration
+                    );
+                },
+                ts(from), ts(to)
+        );
+    }
+
+    public List<VoipBySolutionDto> fetchVoipBySolution(Instant from, Instant to) {
+        return jdbcTemplate.query(
+                """
+                SELECT ou.name AS solution_name,
+                       COUNT(DISTINCT a.id) AS total_alerts,
+                       COUNT(vcs.id) AS total_voip_calls,
+                       SUM(CASE WHEN vcs.answered_at IS NOT NULL OR vcs.outcome = 'ANSWERED' OR vcs.outcome = 'HANGUP' THEN 1 ELSE 0 END) AS answered_calls
+                FROM organizational_unit ou
+                LEFT JOIN alert a ON a.resolved_solution_id = ou.id AND a.received_at >= ? AND a.received_at < ?
+                LEFT JOIN voice_call_session vcs ON vcs.alert_id = a.id
+                WHERE ou.unit_type = 'SOLUTION'
+                GROUP BY ou.id, ou.name
+                ORDER BY total_alerts DESC, ou.name
+                """,
+                (rs, rowNum) -> {
+                    long totalCalls = rs.getLong("total_voip_calls");
+                    long answered = rs.getLong("answered_calls");
+                    double responseRate = totalCalls > 0 ? Math.round((double) answered / totalCalls * 1000.0) / 10.0 : 0.0;
+                    return new VoipBySolutionDto(
+                            rs.getString("solution_name"),
+                            rs.getLong("total_alerts"),
+                            totalCalls,
+                            answered,
+                            responseRate
+                    );
+                },
+                ts(from), ts(to)
         );
     }
 
     public List<LabelCountDto> fetchVoipByEscalationStep(Instant from, Instant to) {
         return jdbcTemplate.query(
                 """
-                SELECT COALESCE(re.current_step::text, 'unknown') AS label, COUNT(*) AS cnt
-                FROM notification n
-                LEFT JOIN routing_execution re ON re.id = n.routing_execution_id
-                WHERE n.notification_type = 'VOIP'
-                  AND n.created_at >= ? AND n.created_at < ?
+                SELECT COALESCE(re.current_step::text, '1') AS label, COUNT(*) AS cnt
+                FROM voice_call_session vcs
+                LEFT JOIN routing_execution re ON re.id = vcs.routing_execution_id
+                WHERE vcs.started_at >= ? AND vcs.started_at < ?
                 GROUP BY re.current_step
                 ORDER BY re.current_step NULLS LAST
                 """,
@@ -407,18 +535,21 @@ public class DashboardProjectionRepository {
                        p.email,
                        p.phone,
                        p.active,
+                       pcs.last_voip_outcome,
+                       pcs.sip_reachability,
                        COUNT(n.id) AS total_notifs,
                        SUM(CASE WHEN n.notification_status = 'SENT' THEN 1 ELSE 0 END) AS success_count,
                        SUM(CASE WHEN n.notification_status = 'FAILED' THEN 1 ELSE 0 END) AS failed_count,
                        SUM(CASE WHEN n.notification_type = 'VOIP' THEN 1 ELSE 0 END) AS voip_calls,
                        MAX(n.created_at) AS last_contact
                 FROM person p
+                LEFT JOIN person_contact_state pcs ON pcs.person_id = p.id
                 LEFT JOIN notification_recipient nr ON nr.person_id = p.id
                 LEFT JOIN notification n ON n.id = nr.notification_id
                     AND n.created_at >= ? AND n.created_at < ?
                 WHERE p.active = TRUE
                    OR n.id IS NOT NULL
-                GROUP BY p.id, p.full_name, p.email, p.phone, p.active
+                GROUP BY p.id, p.full_name, p.email, p.phone, p.active, pcs.last_voip_outcome, pcs.sip_reachability
                 ORDER BY COUNT(n.id) DESC, p.full_name
                 LIMIT 100
                 """,
@@ -439,7 +570,9 @@ public class DashboardProjectionRepository {
                             success,
                             failed,
                             rs.getLong("voip_calls"),
-                            toInstant(rs.getTimestamp("last_contact"))
+                            toInstant(rs.getTimestamp("last_contact")),
+                            rs.getString("last_voip_outcome"),
+                            rs.getString("sip_reachability") != null ? rs.getString("sip_reachability") : "UNKNOWN"
                     );
                 },
                 ts(from), ts(to)

@@ -45,9 +45,23 @@ public class RoutingEngine {
             return pendingDecision(null, null, "NO_POLICY", List.of());
         }
 
-        RoutingStepDefinition firstStep = policy.steps().getFirst();
-        List<ResolvedPerson> candidates = personResolver.resolve(context, firstStep);
-        ResolvedPerson selected = candidates.isEmpty() ? null : candidates.getFirst();
+        RoutingStepDefinition selectedStep = null;
+        List<ResolvedPerson> candidates = List.of();
+        ResolvedPerson selected = null;
+
+        for (RoutingStepDefinition step : policy.steps()) {
+            List<ResolvedPerson> resolved = personResolver.resolve(context, step);
+            if (!resolved.isEmpty()) {
+                selectedStep = step;
+                candidates = resolved;
+                selected = resolved.getFirst();
+                break;
+            }
+        }
+
+        if (selectedStep == null) {
+            selectedStep = policy.steps().getFirst();
+        }
 
         UUID executionId = UUID.randomUUID();
         routingExecutionRepository.save(RoutingExecutionEntity.create(
@@ -57,7 +71,7 @@ public class RoutingEngine {
                 policy.id(),
                 context.solutionUnitId(),
                 selected == null ? null : selected.personId(),
-                firstStep.stepOrder(),
+                selectedStep.stepOrder(),
                 selected == null ? "NO_PERSON" : "STARTED",
                 Instant.now()
         ));
@@ -71,7 +85,7 @@ public class RoutingEngine {
                 selected == null ? null : selected.email(),
                 selected == null ? null : selected.fullName(),
                 context.solutionUnitId(),
-                firstStep,
+                selectedStep,
                 candidates,
                 selected == null ? "NO_PERSON" : "STARTED"
         );

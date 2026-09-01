@@ -1,8 +1,10 @@
 package FST.MST_RSI.PFA.alerting.api.rest;
 
 import FST.MST_RSI.PFA.alerting.application.dto.AlertDto;
+import FST.MST_RSI.PFA.alerting.application.dto.AlertStakeholderDto;
 import FST.MST_RSI.PFA.alerting.application.dto.AlertSummaryDto;
 import FST.MST_RSI.PFA.alerting.application.usecase.GetAlertDetailUseCase;
+import FST.MST_RSI.PFA.alerting.application.usecase.GetAlertStakeholdersUseCase;
 import FST.MST_RSI.PFA.alerting.application.usecase.ListAlertHistoryUseCase;
 import FST.MST_RSI.PFA.alerting.application.usecase.ListRecentAlertsUseCase;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -23,15 +25,18 @@ public class AlertController {
     private final ListRecentAlertsUseCase listRecentAlertsUseCase;
     private final ListAlertHistoryUseCase listAlertHistoryUseCase;
     private final GetAlertDetailUseCase getAlertDetailUseCase;
+    private final GetAlertStakeholdersUseCase getAlertStakeholdersUseCase;
 
     public AlertController(
             ListRecentAlertsUseCase listRecentAlertsUseCase,
             ListAlertHistoryUseCase listAlertHistoryUseCase,
-            GetAlertDetailUseCase getAlertDetailUseCase
+            GetAlertDetailUseCase getAlertDetailUseCase,
+            GetAlertStakeholdersUseCase getAlertStakeholdersUseCase
     ) {
         this.listRecentAlertsUseCase = listRecentAlertsUseCase;
         this.listAlertHistoryUseCase = listAlertHistoryUseCase;
         this.getAlertDetailUseCase = getAlertDetailUseCase;
+        this.getAlertStakeholdersUseCase = getAlertStakeholdersUseCase;
     }
 
     @GetMapping("/recent")
@@ -55,5 +60,11 @@ public class AlertController {
     @PreAuthorize("hasAnyRole('OPS','SUPERVISOR')")
     public AlertDto getDetail(@PathVariable String alertId) {
         return getAlertDetailUseCase.execute(alertId);
+    }
+
+    @GetMapping("/{alertId}/stakeholders")
+    @PreAuthorize("hasAnyRole('OPS','SUPERVISOR')")
+    public List<AlertStakeholderDto> getStakeholders(@PathVariable String alertId) {
+        return getAlertStakeholdersUseCase.execute(alertId);
     }
 }

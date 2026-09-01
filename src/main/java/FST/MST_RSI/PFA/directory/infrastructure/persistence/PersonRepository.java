@@ -8,4 +8,6 @@ import java.util.UUID;
 public interface PersonRepository extends JpaRepository<PersonEntity, UUID> {
 
     Optional<PersonEntity> findByEmailIgnoreCase(String email);
+
+    java.util.List<PersonEntity> findByActiveTrue();
 }

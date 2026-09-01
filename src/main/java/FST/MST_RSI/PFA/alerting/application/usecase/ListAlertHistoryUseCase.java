@@ -26,7 +26,7 @@ public class ListAlertHistoryUseCase {
         if (from.isAfter(to)) {
             throw new BusinessException("INVALID_DATE_RANGE", "Parameter 'from' must be before 'to'");
         }
-        if (page < 0 || size <= 0 || size > 200) {
+        if (page < 0 || size <= 0 || size > 1000) {
             throw new BusinessException("INVALID_PAGINATION", "Invalid pagination parameters");
         }
         return alertMapper.toSummaryList(alertRepositoryPort.findHistory(from, to, page, size));

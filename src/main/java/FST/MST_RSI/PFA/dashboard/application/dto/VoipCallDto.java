@@ -9,6 +9,35 @@ public record VoipCallDto(
         String destination,
         String status,
         Instant createdAt,
-        Integer escalationStep
+        Integer escalationStep,
+        String outcome,
+        Integer durationSeconds,
+        Boolean liveMode,
+        String hangupSource,
+        String failureReason
 ) {
+    public VoipCallDto(
+            String notificationId,
+            String alertId,
+            String personName,
+            String destination,
+            String status,
+            Instant createdAt,
+            Integer escalationStep
+    ) {
+        this(
+                notificationId,
+                alertId,
+                personName,
+                destination,
+                status,
+                createdAt,
+                escalationStep,
+                status,
+                null,
+                false,
+                null,
+                null
+        );
+    }
 }

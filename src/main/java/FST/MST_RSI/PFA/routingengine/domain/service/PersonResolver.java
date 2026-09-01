@@ -2,10 +2,13 @@ package FST.MST_RSI.PFA.routingengine.domain.service;
 
 import FST.MST_RSI.PFA.directory.infrastructure.persistence.OrganizationalUnitEntity;
 import FST.MST_RSI.PFA.directory.infrastructure.persistence.OrganizationalUnitRepository;
+import FST.MST_RSI.PFA.directory.infrastructure.persistence.PersonContactStateEntity;
+import FST.MST_RSI.PFA.directory.infrastructure.persistence.PersonContactStateRepository;
 import FST.MST_RSI.PFA.directory.infrastructure.persistence.PersonEntity;
 import FST.MST_RSI.PFA.directory.infrastructure.persistence.PersonRepository;
 import FST.MST_RSI.PFA.directory.infrastructure.persistence.UnitAdminAssignmentEntity;
 import FST.MST_RSI.PFA.directory.infrastructure.persistence.UnitAdminAssignmentRepository;
+import FST.MST_RSI.PFA.notification.application.service.RecordPersonVoipContactUseCase;
 import FST.MST_RSI.PFA.routingengine.domain.model.ResolvedPerson;
 import FST.MST_RSI.PFA.routingengine.domain.model.RoutingContext;
 import FST.MST_RSI.PFA.routingengine.domain.model.RoutingStepDefinition;
@@ -22,15 +25,18 @@ public class PersonResolver {
     private final OrganizationalUnitRepository unitRepository;
     private final UnitAdminAssignmentRepository assignmentRepository;
     private final PersonRepository personRepository;
+    private final PersonContactStateRepository contactStateRepository;
 
     public PersonResolver(
             OrganizationalUnitRepository unitRepository,
             UnitAdminAssignmentRepository assignmentRepository,
-            PersonRepository personRepository
+            PersonRepository personRepository,
+            PersonContactStateRepository contactStateRepository
     ) {
         this.unitRepository = unitRepository;
         this.assignmentRepository = assignmentRepository;
         this.personRepository = personRepository;
+        this.contactStateRepository = contactStateRepository;
     }
 
     public List<ResolvedPerson> resolve(RoutingContext context, RoutingStepDefinition step) {
@@ -61,6 +67,20 @@ public class PersonResolver {
         return persons;
     }
 
+    private boolean isVoipStep(RoutingStepDefinition step) {
+        String channel = step.channel();
+        return channel == null
+                || "VOIP".equalsIgnoreCase(channel)
+                || "VOICE".equalsIgnoreCase(channel);
+    }
+
+    private boolean isSipUnreachable(UUID personId) {
+        return contactStateRepository.findById(personId)
+                .map(PersonContactStateEntity::getSipReachability)
+                .filter(RecordPersonVoipContactUseCase::shouldSkipAutoVoip)
+                .isPresent();
+    }
+
     private UUID resolveUnitId(RoutingContext context, String targetUnitType) {
         return switch (targetUnitType) {
             case "SOLUTION" -> context.solutionUnitId();
@@ -79,14 +99,20 @@ public class PersonResolver {
     }
 
     public HierarchyIds resolveHierarchy(UUID solutionUnitId) {
+        if (solutionUnitId == null) {
+            return new HierarchyIds(null, null, null, null);
+        }
         OrganizationalUnitEntity solution = unitRepository.findById(solutionUnitId).orElse(null);
         if (solution == null) {
             return new HierarchyIds(null, null, null, null);
         }
         UUID domainId = solution.getParentUnitId();
-        UUID poleId = unitRepository.findById(domainId).map(OrganizationalUnitEntity::getParentUnitId).orElse(null);
-        UUID entityId = poleId == null ? null
-                : unitRepository.findById(poleId).map(OrganizationalUnitEntity::getParentUnitId).orElse(null);
+        UUID poleId = domainId != null
+                ? unitRepository.findById(domainId).map(OrganizationalUnitEntity::getParentUnitId).orElse(null)
+                : null;
+        UUID entityId = poleId != null
+                ? unitRepository.findById(poleId).map(OrganizationalUnitEntity::getParentUnitId).orElse(null)
+                : null;
         return new HierarchyIds(solutionUnitId, domainId, poleId, entityId);
     }
 

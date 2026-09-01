@@ -61,20 +61,37 @@ public class GeminiClassifierAdapter implements AlertClassifierPort {
                 )
         );
 
-        String path = "/v1beta/models/" + properties.model() + ":generateContent";
-        try {
-            String response = llmHttpClient.postJson(
-                    properties.baseUrl(),
-                    path,
-                    Map.of("key", properties.apiKey()),
-                    body,
-                    Duration.ofSeconds(Math.max(1, properties.timeoutSeconds()))
-            );
-            String text = extractText(response);
-            return responseValidator.parseAndValidate(text, businessContext);
-        } catch (LlmClientException ex) {
-            return ClassificationResult.fallback(ex.getMessage());
+        List<String> modelsToTry = new java.util.ArrayList<>();
+        if (properties.model() != null && !properties.model().isBlank()) {
+            modelsToTry.add(properties.model());
         }
+        for (String fallbackModel : List.of("gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.6-flash")) {
+            if (!modelsToTry.contains(fallbackModel)) {
+                modelsToTry.add(fallbackModel);
+            }
+        }
+
+        LlmClientException lastException = null;
+
+        for (String targetModel : modelsToTry) {
+            String path = "/v1beta/models/" + targetModel + ":generateContent";
+            try {
+                String response = llmHttpClient.postJson(
+                        properties.baseUrl(),
+                        path,
+                        Map.of("key", properties.apiKey()),
+                        body,
+                        Duration.ofSeconds(Math.max(1, properties.timeoutSeconds()))
+                );
+                String text = extractText(response);
+                return responseValidator.parseAndValidate(text, businessContext);
+            } catch (LlmClientException ex) {
+                lastException = ex;
+                // If rate-limited or error, continue to next model in chain
+            }
+        }
+
+        return ClassificationResult.fallback(lastException != null ? lastException.getMessage() : "LLM classification failed");
     }
 
     private String extractText(String responseBody) {

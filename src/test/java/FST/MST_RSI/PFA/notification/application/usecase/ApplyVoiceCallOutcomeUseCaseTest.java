@@ -45,6 +45,10 @@ class ApplyVoiceCallOutcomeUseCaseTest {
     private RoutingEscalationEngine routingEscalationEngine;
     @Mock
     private AuditRecorder auditRecorder;
+    @Mock
+    private FST.MST_RSI.PFA.notification.application.service.VoiceCallNarrative voiceCallNarrative;
+    @Mock
+    private FST.MST_RSI.PFA.notification.application.service.RecordPersonVoipContactUseCase recordPersonVoipContactUseCase;
 
     private ApplyVoiceCallOutcomeUseCase useCase;
     private final UUID sessionId = UUID.randomUUID();
@@ -62,9 +66,12 @@ class ApplyVoiceCallOutcomeUseCaseTest {
                 routingExecutionRepository,
                 routingEscalationEngine,
                 auditRecorder,
-                new LiveManualCallTracker()
+                new LiveManualCallTracker(),
+                voiceCallNarrative,
+                recordPersonVoipContactUseCase
         );
         lenient().when(sessionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(voiceCallNarrative.describe(any(), any(), any(), any())).thenReturn("Appel VoIP vers destinataire.");
     }
 
     @Test
